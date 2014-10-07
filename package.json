@@ -1,0 +1,13 @@
+{
+	"name": "AlfredShowManager",
+	"description": "Find, stream, download, manage your favorite tv shows from within the comfort of Alfred App",
+	"version": "0.0.1",
+	"dependencies": {
+		"moviedb": "*",
+		"request": "*",
+		"cheerio": "*",
+		"nedb": "*",
+		"easyimage": "*",
+		"node-netcat": "*"
+	}
+}
