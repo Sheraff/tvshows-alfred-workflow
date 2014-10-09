@@ -10,6 +10,10 @@ var weird_block1 = 0;
  * add a no-result case
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
+ * take control of ordering in xml result (feels too messy otherwise here)
+ * add timeout on all LOCAL AND MOVIE DATABASE RELATED functions
+ * db entries keep geting replaced
+ * if VLC stops playing for a while, log progress
  *
  */
 
@@ -36,11 +40,12 @@ var exec;
 
 // server
 var host = process.argv[2]?process.argv[2].split(':'):['127.0.0.1','8374'];
-var server_life = DEBUG?5000:40000;
+var server_life = DEBUG?5000:60000;
 var http_response;
 
 // user prefs
 var mdb_API_key = "26607a596b2ac49958a20ec3ab295259";
+var percent_to_consider_watched = .95;
 
 // alfred
 var w = new alfred_xml("florian.shows");
@@ -59,12 +64,11 @@ var post_process_while_streaming, vlc_monitoring;
 var stream_summary = {};
 
 // globals
-var justCreated = true;
 var db = {};
-var now = new Date(Date.now());
 var timeout = setTimeout(exit_server, server_life);
 var exitInterval;
 var dontLeave = 0;
+var countDownToEcho = 0;
 
 
 //////////////
@@ -88,16 +92,15 @@ http.createServer(function (req, res) {
 
 			if(post['stream'])
 				handle_stream(post['stream'], post['show_id']);
+
 			else if(post['fav'])
 				toggle_fav(post['fav'], post['bool'], true);
+
 			else
-				search_for_show(post['query']);
+				use_query(post['query']);
 
 			if(is_streaming)
 				post_process_while_streaming = setTimeout(post_processing, delay_before_post_process);
-
-			if(justCreated)
-				finish_loading();
 		});
 	} else {
 		http_response.end('pong');
@@ -112,117 +115,18 @@ if(DEBUG) {
 }
 
 function initialize () {
-	//create db folder
+	//things to do right away
 	if(!fs.existsSync(db_folder)) fs.mkdirSync(db_folder);
-}
 
-function finish_loading () {
-	justCreated = false;
-	if(!db.xml) db.xml = new Datastore({ filename: db_folder+"/xml.db", autoload: true });
-	if(!db.queries_history) db.queries_history = new Datastore({ filename: db_folder+"/queries_history.db", autoload: true });
-	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
-	if(!cheerio) cheerio = require('cheerio');
-	if(!mdb) mdb = require('moviedb')(mdb_API_key);
-	if(!request) request = require('request');
-	if(!exec) exec = require('child_process').exec;
-}
-
-
-///////////////////////
-//  STREAMING LOGIC  //
-///////////////////////
-
-function handle_stream (info, id){
-	http_response.end('ok');
-	is_streaming = true;
-
-	// parse info
-	stream_summary.showId = id;
-	stream_summary.showName = info.split(', S');
-	stream_summary.season = stream_summary.showName[1].split('E');
-	stream_summary.episode = parseInt(stream_summary.season[1].split(':')[0]);
-	stream_summary.season = parseInt(stream_summary.season[0]);
-	stream_summary.showName = stream_summary.showName[0].trim();
-	stream_summary.monitorCounter = 0;
-	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
-
-	if(!Netcat) Netcat = require('node-netcat');
-	vlc_monitoring = setInterval(monitor_vlc, 2000);
-}
-
-function monitor_vlc (){
-	var client = Netcat.client(vlc_tcp[1], vlc_tcp[0]);
-	var full_data = "";
-	var get_length = (stream_summary.progress && !stream_summary.duration && (stream_summary.monitorCounter++)>30);
-
-	client.on('open', function () {
-		client.send((get_length?'get_length':'get_time')+'\n', true);
-	});
-
-	client.on('data', function (data) {
-		full_data += data.toString('ascii');
-	});
-
-	client.on('error', function (err) {
-		if(err=="Error: connect ECONNREFUSED")
-			finish_streaming();
-		else
-			console.log("err: "+err);
-	});
-
-	client.on('close', function () {
-		var number = full_data.match(/[0-9]+$/m);
-		if(number){
-			if(get_length){
-				console.log("duration: "+number[0]+"s ("+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+")");
-				stream_summary.duration = number[0];
-			}
-			else{
-				console.log("progress: "+number[0]+"s ("+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+")");
-				stream_summary.progress = number[0];
-			}
-		}
-	});
-
-	client.start();
-}
-
-function finish_streaming (){
-	clearInterval(vlc_monitoring);
-	is_streaming = false;
-	console.log("finish");
-
-	//check that we have all the data we need and log it to db
-	console.log(stream_summary);
-	if(stream_summary.showId && stream_summary.season && stream_summary.episode && stream_summary.duration && stream_summary.progress){
-		var setModifier = { $set: {} };
-		setModifier.$set["last_watched.season"] = stream_summary.season;
-		setModifier.$set["last_watched.episode"] = stream_summary.episode;
-		setModifier.$set["last_watched.progress"] = stream_summary.progress;
-		setModifier.$set["last_watched.duration"] = stream_summary.duration;
-		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".duration"] = stream_summary.duration;
-		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".progress"] = stream_summary.progress;
-
-		// TODO if it a few episodes in a row are watched, add to favorites
-
-		db.shows.update({
-			id: parseInt(stream_summary.showId)
-		}, setModifier, {}, (function (stream_summary, err, numReplaced, newDoc){
-			console.log("logging "+stream_summary.showName+" at "+Math.round(100*stream_summary.progress/stream_summary.duration)+"%");
-		}).bind(undefined, stream_summary));
-	}
-
-	// kill peerflix
-	fs.readFile(peerflix_pid, 'utf8', function (err, data) {
-		process.kill(data, 'SIGINT');
-		console.log("peerflix killed");
-	});
-
-	// clean peerflix & vlc PID
-	fs.unlink(peerflix_pid);
-	fs.unlink(vlc_pid);
-
-	console.log('all done');
+	//things that can wait a second
+	setTimeout(function () {
+		if(!db.queries_history) db.queries_history = new Datastore({ filename: db_folder+"/queries_history.db", autoload: true });
+		if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+		if(!cheerio) cheerio = require('cheerio');
+		if(!mdb) mdb = require('moviedb')(mdb_API_key);
+		if(!request) request = require('request');
+		if(!exec) exec = require('child_process').exec;
+	}, 2000);
 }
 
 
@@ -230,71 +134,53 @@ function finish_streaming (){
 //  INTERFACE LOGIC  //
 ///////////////////////
 
-function search_for_show (query) {
-	query = query || 'miscTopRatedTvs';
+function use_query (query) {
+	console.log("use_query");
 	query = query.trim();
+	if(query && query!="miscTopRatedTvs")
+		search_for_show(query)
+	else
+		homepage()
+}
 
-	console.log("\nquery: "+query);
-
-	if(!db.xml) db.xml = new Datastore({ filename: db_folder+"/xml.db", autoload: true });
-	db.xml.findOne({ query: query}, function (err, doc) {
-		if(false && doc && doc.timestamp > Date.now()-60*60*1000){ // WARNING TODO deactivated direct xml restitution
-			console.log("from previous query");
-			if(DEBUG)
-				console.log(doc.xml);
-			else
-				http_response.end(doc.xml);
-		} else {
-			w.for_query = query;
-
-			if(!db.queries_history) db.queries_history = new Datastore({ filename: db_folder+"/queries_history.db", autoload: true });
-			db.queries_history.findOne({ query: query }, (function (query, err, doc) { // check if we have a recent enough (1 day) result from this query
-				if(doc && doc.timestamp < Date.now()+24*60*60*1000){
-					console.log("using stored query results");
-					use_results(doc.results, query);
-				} else {
-					console.log("new query to mdb");
-					if(!mdb) mdb = require('moviedb')(mdb_API_key);
-					mdb[(query=='miscTopRatedTvs'?'miscTopRatedTvs':'searchTv')]( // if we don't, then query The Movie DB to get one and store it in the db
-						(query=='miscTopRatedTvs'?{}:{query: query, page: 1, search_type: "ngram"}),
-						(function (query, err, res) {
-
-							db.queries_history.update({
-								query: query
-							}, {
-								query: query,
-								timestamp: Date.now(),
-								results: res.results
-							}, { upsert: true });
-
-							if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
-							for (var i = 0, l = res.results.length; i < l; i++) { // take that opportunity to make sure we have all name->id associations in the shows.db
-								if(good_enough_show(res.results[i])){
-									db.shows.update({
-										id: parseInt(res.results[i].id)
-									}, {
-										name: res.results[i].name,
-										id: res.results[i].id,
-										poster_path: res.results[i].poster_path,
-										first_air_date: res.results[i].first_air_date,
-										vote_average: res.results[i].vote_average,
-										popularity: res.results[i].popularity
-									}, { upsert: true });
-								}
-							};
-
-							use_results(res.results, query);
-
-						}).bind(undefined, query)
-					);
-				}
-			}).bind(undefined, query));
+function homepage() {
+	console.log("homepage");
+	//echo favs with ordering: output + simple info
+	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+	one_more_thing_to_do();
+	db.shows.find({ fav: true }, function (err, docs) {
+		if(docs){
+			for (var i = 0, l = docs.length; i < l; i++) {
+				one_more_thing_to_do();
+				complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output);
+			};
 		}
+
+		//echo misctv: simple output
+		one_more_thing_to_do();
+		search_on_mdb("miscTopRatedTvs", function (results) {
+			for (var i = 0, l = results.length; i < l; i++) {
+				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs))){
+					one_more_thing_to_do();
+					simple_output(results[i], try_to_output);
+				}
+			}
+			try_to_output();
+		});
+
+		try_to_output();
 	})
 }
 
-function use_results (results, query) {
-	if(query!='miscTopRatedTvs'){
+function search_for_show (query) {
+	console.log("search_for_show");
+	//search_on_mdb
+	search_on_mdb (query, (function (query, results) {
+
+		if(!results || results.length==0)
+			no_result();
+
+		// is query a match for a show (exact match or only one result)
 		var only_one_good_show = false, good_shows_count = 0, exact_match = false;
 		for (var i = results.length - 1; i >= 0; i--) {
 			if(good_enough_show(results[i])){
@@ -305,234 +191,278 @@ function use_results (results, query) {
 				good_shows_count++;
 			}
 		};
-		if(good_shows_count>1) only_one_good_show = false;
-	}
+		if(good_shows_count==0)
+			no_result();
+		else if(good_shows_count>1 || (only_one_good_show && simplify_str(query)!=simplify_str(only_one_good_show.name))) only_one_good_show = false;
 
-	if(query!='miscTopRatedTvs' && ((only_one_good_show && simplify_str(query)==simplify_str(only_one_good_show.name)) || query==exact_match.name)){
-		console.log("details (exact match or single approximate match)");
-		if(exact_match) only_one_good_show = exact_match;
-		if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
-		db.shows.findOne({ id: only_one_good_show.id }, (function (id, err, doc) {
-			if(doc && doc.timestamp && doc.timestamp>Date.now()-12*60*60*1000){ // if we have info recent enough (based on previously recorded dates) about it, use it
-				console.log("this show already exists (with recent tvinfo details) in the database");
-				//find latest season & if not up to date, query mdb
-				var temp_latest_season = find_latest(doc.season);
-				if(!temp_latest_season || (temp_latest_season && !temp_latest_season.timestamp) || (temp_latest_season && temp_latest_season.timestamp && temp_latest_season.timestamp<Date.now()-12*60*60*1000)){
-					detail_season(temp_latest_season.season_number, doc, output_show);
+
+		//single result: complete info
+		if(only_one_good_show || exact_match ){
+			complete_output(only_one_good_show || exact_match, one_more_thing_to_do, try_to_output);
+		}
+
+		//multiple results: simple output
+		else {
+			for (var i = 0, l = results.length; i < l; i++) {
+				if(good_enough_show(results[i])){
+					one_more_thing_to_do();
+					simple_output(results[i], try_to_output);
+				}
+			}
+		}
+	}).bind(undefined, query))
+}
+
+function no_result(){
+	w.add("No result.");
+	try_to_output();
+}
+
+function simple_output(result, callback) {
+	console.log("simple_output");
+		var item = w.add(result.name);
+		item.autocomplete = result.name;
+		item.valid = "NO";
+		// item.subtitle = rating_in_stars(result.vote_average); // +" — "+result.name+(result.first_air_date?" ("+(result.first_air_date.split("-")[0])+")":"");
+		fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
+			item.icon = exists?name:"icon.png";
+			callback();
+		}).bind(undefined, callback, item, imgs_folder+"/"+result.id+".jpg"));
+}
+
+function complete_oneline_output (result, callup, calldown) {
+	console.log("complete_oneline_output");
+	//add result
+	var item = w.add(result.name, w.results.length+1);
+	item.subtitle = "♥ ";
+	item.autocomplete = result.name;
+	item.valid = "NO";
+	item.uid = "result.name";
+	callup();
+	fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
+		item.icon = exists?name:"icon.png";
+		callback();
+	}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
+
+	//look for extra things to display
+	db.shows.findOne({ id: result.id }, (function (callback, item, err, doc) {
+		if(doc) find_ep_to_watch(doc, (function (callback, item, doc, episode) {
+			if(episode){
+				if(episode.progress){
+					item.subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+				} else if(doc.status && doc.status=="Ended") {
+					item.subtitle += "Ended";
+				} else if(doc.last_watched) {
+					item.subtitle += "Next up: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 				} else {
-					console.log("not getting season details this time")
-					output_show(doc);
+					item.subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 				}
-			} else { // otherwise, query the info and store it
-				// TODO send out a notification: this might take a second fetching the data
-				if(!exec) exec = require('child_process').exec;
-				exec("/usr/bin/terminal-notifier -title \""+(doc.name?doc.name:"New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2 -contentImage \""+imgs_folder+"/"+id+".jpg\"", function(){});
-				console.log("updating tvInfo for this show");
-				mdb.tvInfo({id: id}, (function (doc, err, res) {
-					if(!doc) doc = {};
-					doc["name"] = res.name;
-					doc["id"] = parseInt(res.id);
-					doc["poster_path"] = res.poster_path;
-					doc["first_air_date"] = res.first_air_date;
-					doc["popularity"] = res.popularity;
-					doc["timestamp"] = Date.now();
-					doc["created_by"] = res.created_by;
-					doc["genres"] = res.genres;
-					doc["last_air_date"] = res.last_air_date;
-					doc["number_of_episodes"] = res.number_of_episodes;
-					doc["number_of_seasons"] = res.number_of_seasons;
-					doc["overview"] = res.overview;
-					doc["popularity"] = res.popularity;
-					doc["vote_average"] = res.vote_average;
-					doc["status"] = res.status;
-					if(!doc["season"]) doc["season"] = {};
-					for (var i = 0, l = res.seasons.length; i < l; i++) {
-						doc["season"][""+res.seasons[i].season_number+""] = res.seasons[i];
-					};
-					db.shows.update({
-						id: parseInt(doc.id)
-					}, doc, { upsert: true }, function (){
-						console.log(" ... updated "+(doc.name?doc.name:"")+" with tv_info");
-					});
-
-					var temp_latest_season = find_latest(res.seasons);
-					if(temp_latest_season){
-						detail_season(temp_latest_season.season_number, doc, output_show);
+				callback();
+			} else {
+				find_next_release(doc, (function (callback, item, doc, episode) {
+					if(episode){
+						var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
+						var date = episode.air_date?parse_date(episode.air_date):false;
+						if(date) item.subtitle += first+" episode"+date
+					} else if(doc.status && doc.status=="Ended") {
+						item.subtitle += "Ended";
 					} else {
-						console.log(res);
-						console.log("not getting season details this time")
-						output_show(doc);
+						item.subtitle += "Next episode's date not set yet";
 					}
-				}).bind(undefined, doc))
+					callback();
+				}).bind(undefined, callback, item, doc));
 			}
-		}).bind(undefined, only_one_good_show.id));
-	} else {
-		// if main screen, display favorites
-		if(query=="miscTopRatedTvs"){
-			console.log("showing favorite shows")
-			db.shows.find({fav: true}, (function (results, err, docs) {
-				if(docs){
-					for (var i = 0, l = docs.length; i < l; i++) {
-						if(good_enough_show(docs[i])){
-							//add to xml
-							w.add(docs[i].id, docs[i].name, "", "");
-							w.last_result.autocomplete = docs[i].name;
-							w.last_result.icon = fs.existsSync(imgs_folder+"/"+docs[i].id+".jpg")?imgs_folder+"/"+docs[i].id+".jpg":"icon.png";
-							w.last_result.valid = "NO";
-						}
-					};
-				}
-				list_results(results)
-			}).bind(undefined, results))
+		}).bind(undefined, callback, item, doc))
+		else callback();
+	}).bind(undefined, calldown, item));
+}
+
+function complete_output (result, callup, calldown) {
+	console.log("complete_output");
+	//this might take some time notification
+	console.log("notif: "+(result.name?result.name:"New TV show")+" "+result.id)
+	if(!exec) exec = require('child_process').exec;
+	exec("/usr/bin/terminal-notifier -title \""+(result.name?result.name:"New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":""), function(){});
+	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
+		if(doc){
+			complete_output_2(doc, callup, calldown)
 		} else {
-			list_results(results)
+			detail_show(result, (function (callup, calldown, doc) {
+				complete_output_2 (doc, callup, calldown)
+			}).bind(undefined, callup, calldown));
 		}
-
-	}
+	}).bind(undefined, callup, calldown, result));
 }
 
-function list_results (results){
-	console.log("showing search results");
-	for (var i = 0, l = results.length; i < l; i++) {
-		if(good_enough_show(results[i])){
-			//add to xml
-			w.add("", results[i].name, "", "");
-			w.last_result.autocomplete = results[i].name;
-			w.last_result.icon = fs.existsSync(imgs_folder+"/"+results[i].id+".jpg")?imgs_folder+"/"+results[i].id+".jpg":"icon.png";
-			w.last_result.valid = "NO";
-		}
-	};
-	w.echo();
-}
-
-function detail_season (season_number, doc, callback) {
-	console.log("updating tvSeasonInfo for season "+season_number)
-
-	mdb.tvSeasonInfo({id: doc.id, season_number: season_number}, (function (season_number, doc, err, res) {
-
-		doc["season"][""+season_number+""]["timestamp"] = Date.now();
-		doc["season"][""+season_number+""]["name"] = res.name;
-		doc["season"][""+season_number+""]["overview"] = res.overview;
-		doc["season"][""+season_number+""]["air_date"] = res.air_date;
-		if(!doc["season"][""+season_number+""]["episode"]) doc["season"][""+season_number+""]["episode"] = {};
-		for (var i = 0, l = res.episodes.length; i < l; i++) {
-			if(!doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]) doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""] = {};
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["episode_number"] = res.episodes[i].episode_number;
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["season_number"] = season_number;
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["air_date"] = res.episodes[i].air_date;
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["name"] = res.episodes[i].name;
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["overview"] = res.episodes[i].overview;
-			doc["season"][""+season_number+""]["episode"][""+res.episodes[i].episode_number+""]["still_path"] = res.episodes[i].still_path;
-		};
-		db.shows.update({
-			id: parseInt(doc.id)
-		}, doc, {}, (function (){
-			console.log(" ... updated "+(doc.name?doc.name+" ":"")+"with tvSeasonInfo for season "+season_number);
-		}).bind(undefined, season_number));
-
-		callback(doc);
-
-	}).bind(undefined, season_number, doc))
-}
-
-function found_next(episode){
-	if(episode) {
-		var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
-		var date = episode.air_date?parse_date(episode.air_date):false;
-		var subtitle = (date ? episode.air_date : "")+(" S"+leading_zero(episode.season_number)+"E"+leading_zero(episode.episode_number))+((episode.name && pretty_string(episode.name))?" "+episode.name:"");
-		date = date ? " "+date : "'s air date not set yet";
-		w.add("", first+" episode"+date, subtitle, "");
-	} else {
-		w.add("", "Next episode's air date not set yet", "", "")
-	}
-	w.last_result.autocomplete = "";
-	w.last_result.valid = "NO";
-	time_to_echo();
-}
-
-function output_show (show) {
-	//next for me to watch
-
-	//next ep to be released
-	if(show.status != "Ended"){
-		find_next_ep(show, found_next);
-	} else {
-		time_to_echo();
-	}
-
-	// add (or remove) from my favorites
-	if(show.fav==true)
-		w.add("", "Remove "+show.name+" from my favorites", "", "f0"+show.id);
-	else
-		w.add("", "Add "+show.name+" to my favorites", "", "f1"+show.id);
-	w.last_result.icon = "love.png";
-
-	//details
-	var ratings = Math.round(show.vote_average/2)
-	var stars = "";
-	for (var i = 1; i < 6; i++) {
-		stars+=i>ratings?"☆":"★"
-	};
-	var year = show.first_air_date.split("-")[0];
-	var genres = "";
-	for (var i = 0, l = show.genres.length; i < l; i++) {
-		genres += (i>0?", ":"")+show.genres[i].name;
-	};
-	make_preview_page(show.id, show.name, genres, ratings, show.status, year, show.overview);
-	w.add("", show.overview, stars+" ("+year+") "+genres+" — "+show.status, "l"+show.id);
-	w.last_result.largetype = show.overview;
-	w.last_result.icon = "what.png";
-
-	//latest ep
-	var latest_season = find_latest(show.season);
-	if(latest_season && latest_season.episode){
-		var latest_ep = find_latest(latest_season.episode);
-		var formated_episode_nb = "S"+leading_zero(latest_season.season_number)+"E"+leading_zero(latest_ep.episode_number);
-		if(latest_ep && latest_ep.magnet){
-			console.log("pulling magnet from db")
-			var title = "latest episode: "+formated_episode_nb+" "+latest_ep.name;
-			var subtitle = latest_ep.magnet.piratebay?"↵ to stream "+latest_ep.magnet.piratebay.name:(date_from_tmdb_format(latest_ep.air_date)>Date.now()-24*60*60*1000?"This episode just came out, give it a few hours and it'll be available...":"Not available on piratebay");
-			if(latest_ep.magnet.piratebay)
-				w.add("", title, subtitle, "m"+show.id+" "+latest_ep.magnet.piratebay.magnetLink+" "+show.name+", "+formated_episode_nb+": "+latest_ep.name);
+function complete_output_2 (doc, callup, calldown){
+	console.log("complete_output_2");
+	//what to watch
+	callup();
+	find_ep_to_watch(doc, (function (callup, calldown, episode, doc) {
+		if(episode){
+			//get magnet
+			callup();
+			get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
+				var item = w.add("", 1);
+				if(episode.progress && episode.progress>30){
+					if(magnet.piratebay){
+						item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
+						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )";
+						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )";
+					}
+					else{
+						item.title = "You stopped at % of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
+						item.subtitle = "but this episode isn't available on piratebay anymore. Press Enter to mark as watched."
+					}
+				} else {
+					item.title = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					if(doc.last_watched)
+						item.title = "Up next: "+item.title;
+					else
+						item.title = "Latest episode: "+item.title;
+					if(magnet.piratebay){
+						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )";
+					} else {
+						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
+							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
+						else
+							item.subtitle = "Not available on piratebay";
+						item.valid="NO";
+					}
+				}
+				if(magnet.piratebay){
+					item.arg = "m"+doc.id+" "+(episode.progress || 0)+" "+magnet.piratebay.magnetLink+" "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
+					item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
+				}
+				callback();
+			}).bind(undefined, calldown, episode, doc))
+		} else {
+			var item = w.add("", 1)
+			if(show.status == "Ended"){
+				item.title = "You have finished this show. Congratulation ;-)";
+				item.subtitle = "Press Enter to mark as not watched";
+			}
 			else{
-				w.add("", title, subtitle, "");
-				w.last_result.valid = "NO";
-			}
-			time_to_echo();
-		} else {
-			console.log("fetching magnet from piratebay");
-			search_piratebay(show.name+" "+formated_episode_nb, (function (latest_ep, latest_season_number, results) {
-				var title = "latest episode: "+formated_episode_nb+" "+latest_ep.name;
-				var subtitle = results.length>0?"↵ to stream "+results[0].name:(date_from_tmdb_format(latest_ep.air_date)>Date.now()-24*60*60*1000?"This episode just came out, give it a few hours and it'll be available...":"Not available on piratebay");
-				if(results.length>0)
-					w.add("", title, subtitle, "m"+show.id+" "+results[0].magnetLink+" "+show.name+", "+formated_episode_nb+": "+latest_ep.name);
-				else{
-					w.add("", title, subtitle, "");
-					w.last_result.valid = "NO";
+				item.title = "You are up to date with this show";
+				if(doc.last_watched){
+					item.subtitle = "up to s"+doc.last_watched.season+"e"+doc.last_watched.episode;
+				} else {
+					item.subtitle = "but this show hasn't ended yet"
 				}
-				time_to_echo();
-				var fieldName = "season."+latest_season_number+".episode."+latest_ep.episode_number+".magnet";
-				var setModifier = { $set: {} };
-				setModifier.$set[fieldName+".timestamp"] = Date.now();
-				setModifier.$set[fieldName+".piratebay"] = (results.length>0)?results[0]:false;
-				db.shows.update({
-					id: parseInt(show.id)
-				}, setModifier, { upsert: true }, function (err, numReplaced, newDoc){
-					console.log(" ... updated magnet "+(numReplaced>0?">0":"false"));
-				});
-			}).bind(undefined, latest_ep, latest_season.season_number));
+			}
 		}
-	} else {
-		time_to_echo();
+
+		//next out
+		find_next_release(doc, (function (callback, episode, doc) {
+			if(episode){
+				var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
+				var date = episode.air_date ? pretty_date(episode.air_date) : false;
+				var subtitle = (date ? episode.air_date : "")+" — "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name)) ? " — "+episode.name : "" );
+				date = date ? " "+date : "'s air date not set yet";
+				var item = w.add(first+" episode"+date, 2);
+				item.subtitle = subtitle;
+			} else {
+				if(doc.status){
+					var item = w.add("---", 2);
+					if(doc.status != "Ended")
+						item.subtitle = "Next episode's date not set yet";
+					else
+						item.subtitle = "This show has ended :-(";
+				}
+			}
+
+			//description
+			var rating = Math.round(doc.vote_average/2)
+			var stars = rating_in_stars(doc.vote_average)
+			var year = doc.first_air_date.split("-")[0];
+			var genres = "";
+			for (var i = 0, l = doc.genres.length; i < l; i++) {
+				genres += (i>0?", ":"")+doc.genres[i].name;
+			};
+			make_preview_page(doc.id, doc.name, genres, rating, doc.status, year, doc.overview);
+			var item = w.add(doc.overview, 3);
+			item.subtitle = stars+" ("+year+") "+genres+" — "+doc.status;
+			item.arg = "l"+doc.id
+			item.largetype = doc.overview;
+			item.icon = "what.png";
+
+			//favorite toggle
+			var item = w.add("", 5)
+			if(doc.fav==true){
+				item.title = "Remove "+doc.name+" from my favorites";
+				item.arg = "f0"+doc.id;
+			}
+			else{
+				item.title = "Add "+doc.name+" to my favorites";
+				item.arg = "f1"+doc.id;
+			}
+			item.subtitle = "Favorited TV Shows appear on the main screen with nifty results :-)"
+			item.icon = "love.png";
+
+			//watch specific episode TODO
+
+			callback();
+		}).bind(undefined, calldown));
+	}).bind(undefined, callup, calldown));
+}
+
+function one_more_thing_to_do(n){
+	countDownToEcho+=n||1;
+}
+
+function try_to_output(){
+	countDownToEcho--;
+	if(countDownToEcho<=0){
+		countDownToEcho=0;
+		console.log("try_to_output: passed");
+		if(DEBUG)
+			console.log(w.echo());
+		else
+			http_response.end(w.echo());
 	}
 }
 
-var echo_requests_counter = 0;
-function time_to_echo () {
-	if(++echo_requests_counter==2){
-		w.echo();
-		echo_requests_counter = 0;
-	}
+
+///////////////////////
+//  INTERFACE UTILS  //
+///////////////////////
+
+function good_enough_show (show) {
+	return (show.name && show.first_air_date && show.first_air_date.split("-")[0]>1990 && show.popularity>0.008 && show.poster_path);
+}
+
+function pretty_string (str) {
+	return str.replace(/[^a-zA-Z]/g, '').length>3;
+}
+
+function simplify_str (str) {
+	return str.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function leading_zero (str) {
+	return (""+str+"").length==1?"0"+str:str;
+}
+
+function formatted_episode_number(episode){
+	return "s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number);
+}
+
+function rating_in_stars(rating){
+	var stars = "", nb_of_stars = Math.round(rating/2);
+	for (var i = 1; i < 6; i++) { stars+=i>nb_of_stars?"☆":"★" };
+	return stars;
+}
+
+function percent_progress(episode){
+	return Math.round(100*episode.progress/episode.duration);
+}
+
+function is_doc_in_docs (id, docs) {
+	for (var i = docs.length - 1; i >= 0; i--) {
+		if(docs[i].id == id) return true;
+	};
+	return false;
 }
 
 function make_preview_page (id, showName, genres, rating, status, year, text){
@@ -559,8 +489,9 @@ function make_preview_page (id, showName, genres, rating, status, year, text){
 
 }
 
-function parse_date (date) {
+function pretty_date (date) {
 	var next_air_date = date.split("-");
+	var now = new Date(Date.now());
 	next_air_date = new Date(next_air_date[0], next_air_date[1]-1, next_air_date[2]);
 	if(next_air_date.getTime()<now.getTime())
 		return false;
@@ -596,173 +527,321 @@ function parse_date (date) {
 	return next_ep_str;
 }
 
-function simplify_str (str) {
-	return str.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-}
 
-function leading_zero (str) {
-	return (""+str+"").length==1?"0"+str:str;
-}
-
-
-///////////////////////
-//  FAVORITE TOGGLE  //
-///////////////////////
-
-function toggle_fav (id, bool, reply) {
-	if(reply) http_response.end('ok');
-	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
-	var fav = (bool==1||bool==true);
-	db.shows.update({ id: parseInt(id) }, { $set: { fav: fav } }, {}, (function (err, numReplaced) {
-		console.log(fav?"added to favorites":"removed from favorites")
-	}).bind(undefined, fav));
-}
-
-
-///////////////////////
-//  POST-PROCESSING  //
-///////////////////////
-
-function exit_server () {
-	if(!is_streaming){
-		post_processing();
-
-		// exit (wait for all async processes to be done, stops trying if an http request comes in)
-		exitInterval = setInterval(function () {
-			if(dontLeave==0){
-				fs.unlink(node_pid);
-				process.exit();
-			}
-		}, 5000);
-	} else {
-		timeout = setTimeout(exit_server, server_life);
-	}
-}
-
-function post_processing () {
-	// clean & optimize db
-	// db.shows.ensureIndex({ fieldName: 'id', unique: true }, function (err) {});
-	db.queries_history.ensureIndex({ fieldName: 'query', unique: true }, function (err) {});
-	for (var i = db.length - 1; i >= 0; i--) {
-		db[i].persistence.compactDatafile;
-	};
-
-	// dl & crop images
-	if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
-	db.shows.find({}, function (err, docs) {
-		for (var i = docs.length - 1; i >= 0; i--) {
-			dl_image(imgs_folder+"/"+docs[i].id, docs[i].poster_path);
-		};
-	});
-}
-
-function dl_image (img_name, url) {
-	dontLeave++;
-	fs.exists(img_name+".jpg", (function  (img_name, url, exists) {
-		if (!exists) {
-			if(!easyimg) easyimg = require('easyimage');
-			request("https://image.tmdb.org/t/p/w60_or_h91"+url).pipe(fs.createWriteStream(img_name+"-nocrop.jpg")).on('close', (function (img_name) {
-				// crop all images to alfred format
-				easyimg.thumbnail({
-					src:img_name+"-nocrop.jpg", dst:img_name+".jpg",
-					width:60, height:60
-				}).then(function(image) {
-					fs.unlink(imgs_folder+"/"+image.name.replace(".jpg", "-nocrop.jpg"));
-					dontLeave--;
-				}, function (err) {
-					console.log(err);
-				});
-			}).bind(undefined, img_name));
-		} else {
-			dontLeave--;
-		}
-	}).bind(undefined, img_name, url));
-}
-
-
-///////////////////////////////////////////
-//  DEAL WITH THE MOVIE DATABASE THINGS  //
-///////////////////////////////////////////
-
-function date_from_tmdb_format (tmdb_date){
-	var temp_date = tmdb_date.split("-");
-	return new Date(temp_date[0], temp_date[1]-1, temp_date[2])
-}
+////////////////////////////////////////
+//  LOCAL AND MOVIE DATABASE RELATED  //
+////////////////////////////////////////
 
 function find_latest(array) {
-	var latest;
-	var now = Date.now();
-	for (var i = (array.isArray ? array.length : Object.keys(array).length) - 1; i >= 0; i--) {
-		var index = array.isArray ? i : Object.keys(array)[i]
-
-		//avoid season/episode 0 (usually "specials") being the main thing
-		if (array[index].season_number == 0 || array[index].episode_number == 0) continue;
-
-		//initialize with any
-		if (!latest) {
-			if (array[index].air_date && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
-			continue;
-		}
-
-		//if "air_date" is defined for array[index] and is greater than that of latest (or latest's is undefined) but still smaller than Date.now()
-		if (array[index].air_date && (!latest.air_date || array[index].air_date.localeCompare(latest.air_date) > 0) && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
-	};
-	return (latest && latest.air_date) ? latest : false;
+	console.log("find_latest");
+    var latest;
+    var now = Date.now();
+    for (var i = (array.isArray ? array.length : Object.keys(array).length) - 1; i >= 0; i--) {
+        var index = array.isArray ? i : Object.keys(array)[i]
+        //avoid season/episode 0 (usually "specials") being the main thing
+        if (array[index].season_number == 0 || array[index].episode_number == 0) continue;
+        //initialize with any
+        if (!latest) {
+            if (array[index].air_date && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
+            continue;
+        }
+        //if "air_date" is defined for array[index] and is greater than that of latest (or latest's is undefined) but still smaller than Date.now()
+        if (array[index].air_date && (!latest.air_date || array[index].air_date.localeCompare(latest.air_date) > 0) && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
+    };
+    return (latest && latest.air_date) ? latest : false;
 }
 
-function find_next_ep (show, callback) {
-	var latest_season = find_latest(show.season);
-	if(latest_season){
-		if(latest_season.episode){
-			find_next_ep_in_current_season(callback, latest_season, show);
-		} else if (!latest_season.timestamp || latest_season.timestamp<Date.now()-12*60*60*1000) {
-			detail_season(latest_season.season_number, show, find_next_ep_in_current_season.bind(undefined, callback, latest_season));
-		} else {
-			callback(false)
-		}
+function date_from_tmdb_format(tmdb_date) {
+    var temp_date = tmdb_date.split("-");
+    return new Date(temp_date[0], temp_date[1] - 1, temp_date[2])
+}
+
+function find_next_release (show, callback) {
+	console.log("find_next_release");
+	if(show.status == "Ended"){
+		callback(false, show)
 	} else {
-		callback(false)
+	    get_seasons(show, (function(callback, show) {
+	        if (!show.season) callback(false, show)
+	        else {
+	            var latest_season = find_latest(show.season)
+	            if (!latest_season) callback(false, show)
+	            else {
+	                get_episodes(show, latest_season.season_number, (function(callback, season_number, show) {
+	                    if (!show.season[season_number].episode) callback(false, show);
+	                    else{
+	                        var latest_ep = find_latest(show.season[season_number].episode);
+	                        if(show.season[season_number].episode[latest_ep.episode_number+1]){
+	                            callback(show.season[season_number].episode[latest_ep.episode_number+1], show)
+	                        } else if(show.season[season_number+1]) {
+	                            get_episodes(show, season_number+1, (function(callback, season_number, show) {
+	                                if(show.season[season_number].episode[1]) callback(show.season[season_number].episode[1], show)
+	                                else callback(false, show);
+	                            }).bind(undefined, callback, season_number+1))
+	                        } else {
+	                            callback(false, show);
+	                        }
+	                    }
+	                }).bind(undefined, callback, latest_season.season_number))
+	            }
+	        }
+	    }).bind(undefined, callback))
 	}
 }
 
-// continued execution of find_next_ep after query to mdb
-function find_next_ep_in_current_season (callback, latest_season, show) {
-	if(show.season[latest_season.season_number].episode){
-		var latest_episode = find_latest(show.season[latest_season.season_number].episode);
-		if(latest_episode){
-			if(show.season[latest_season.season_number].episode[latest_episode.episode_number+1]){
-				callback(show.season[latest_season.season_number].episode[latest_episode.episode_number+1])
-			} else if(show.season[latest_season.season_number+1]) {
-				if(show.season[latest_season.season_number+1].episode){
-					find_next_ep_in_current_season(callback, show.season[latest_season.season_number+1], show);
-				} else {
-					if(show.season[latest_season.season_number+1].air_date && date_from_tmdb_format(show.season[latest_season.season_number+1].air_date)>Date.now()){
-						callback({"episode_number":1, "season_number": latest_season.season_number+1, "air_date": show.season[latest_season.season_number+1].air_date})
-						if (!show.season[latest_season.season_number+1].timestamp || show.season[latest_season.season_number+1].timestamp<Date.now()-12*60*60*1000)
-							detail_season(latest_season.season_number+1, show, find_next_ep_in_current_season.bind(undefined, function(){}, show.season[latest_season.season_number+1]));
-					} else if (!show.season[latest_season.season_number+1].timestamp || show.season[latest_season.season_number+1].timestamp<Date.now()-12*60*60*1000){
-						detail_season(latest_season.season_number+1, show, find_next_ep_in_current_season.bind(undefined, callback, show.season[latest_season.season_number+1]));
-					} else {
-						callback(false);
-					}
-				}
-			} else {
-				callback(false);
+function find_ep_to_watch(show, callback) {
+	console.log("find_ep_to_watch");
+    if (show.last_watched) {
+    	console.log(1)
+        if (show.last_watched.progress / show.last_watched.duration < percent_to_consider_watched) get_specific_episode(show, show.last_watched.season, show.last_watched.episode, callback)
+        else get_specific_episode(show, show.last_watched.season, show.last_watched.episode + 1, (function(callback, episode) {
+            if (episode) callback(episode, show)
+            else get_specific_episode(show, show.last_watched.season + 1, 1, callback)
+        }).bind(undefined, callback))
+    } else {
+    	console.log(2)
+        get_seasons(show, (function(callback, show) {
+            if (!show.season) callback(false, show)
+            else {
+            	console.log(3)
+                var latest_season = find_latest(show.season)
+                if (!latest_season) callback(false, show)
+                else {
+                	console.log(4)
+                    get_episodes(show, latest_season.season_number, (function(callback, latest_season, show) {
+                        if (!show.season[latest_season.season_number].episode) callback(false, show);
+                        else callback(find_latest(show.season[latest_season.season_number].episode), show)
+                    }).bind(undefined, callback, latest_season))
+                }
+            }
+        }).bind(undefined, callback))
+    }
+}
+
+function get_specific_season(show, season_number, callback) {
+	console.log("get_specific_season");
+    // everything taken care of for getting this season
+    get_seasons(show, (function(callback, season_number, show) {
+        if (show.season && show.season[season_number]) callback(show.season[season_number], show)
+        else callback(false)
+    }).bind(undefined, callback, season_number))
+}
+
+function get_seasons(show, callback) {
+	console.log("get_seasons");
+    // should i go fetch new data for the show?
+    if (!show.season) detail_show(show, callback)
+    else callback(show);
+}
+
+function detail_show(doc, callback) {
+	console.log("detail_show");
+    // fetch new data for the show
+    mdb.tvInfo({
+        id: doc.id
+    }, (function(callback, doc, err, res) {
+    	if(err) console.log(err);
+        doc = update_doc_with_tvInfo(doc, res);
+        callback(doc);
+    }).bind(undefined, callback, doc))
+}
+
+function update_doc_with_seasonInfo(doc, res, season_number) {
+	console.log("update_doc_with_seasonInfo");
+
+    // updates doc with new data for the show
+    doc["season"]["" + season_number + ""]["timestamp"] = Date.now();
+    doc["season"]["" + season_number + ""]["name"] = res.name;
+    doc["season"]["" + season_number + ""]["overview"] = res.overview;
+    doc["season"]["" + season_number + ""]["air_date"] = res.air_date;
+    if (!doc["season"]["" + season_number + ""]["episode"]) doc["season"]["" + season_number + ""]["episode"] = {};
+    for (var i = 0, l = res.episodes.length; i < l; i++) {
+        if (!doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]) doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""] = {};
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["episode_number"] = res.episodes[i].episode_number;
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["season_number"] = season_number;
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["air_date"] = res.episodes[i].air_date;
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["name"] = res.episodes[i].name;
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["overview"] = res.episodes[i].overview;
+        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["still_path"] = res.episodes[i].still_path;
+    };
+
+    // update database with new data for the show
+    var setModifier = { $set: {} };
+    setModifier.$set["season."+season_number+".timestamp"] = Date.now();
+    setModifier.$set["season."+season_number+".name"] = res.name;
+    setModifier.$set["season."+season_number+".overview"] = res.overview;
+    setModifier.$set["season."+season_number+".air_date"] = res.air_date;
+    for (var i = 0, l = res.episodes.length; i < l; i++) {
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".episode_number"] = res.episodes[i].episode_number;
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".season_number"] = season_number;
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".air_date"] = res.episodes[i].air_date;
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".name"] = res.episodes[i].name;
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".overview"] = res.episodes[i].overview;
+    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".still_path"] = res.episodes[i].still_path;
+    }
+    db.shows.update({
+        id: parseInt(doc.id)
+    }, setModifier, {}, (function (){
+        console.log(" ... updated "+(doc.name?doc.name+" ":"")+"with tvSeasonInfo for season "+season_number);
+    }).bind(undefined, season_number));
+    return doc;
+}
+
+function get_specific_episode(show, season_number, episode_number, callback) {
+	console.log("get_specific_episode");
+    // everything taken care of for getting this season
+    get_seasons(show, (function(callback, season_number, episode_number, show) {
+        get_episodes(show, season_number, (function(callback, season_number, episode_number, show) {
+            if (show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
+            else callback(false)
+        }).bind(undefined, callback, season_number, episode_number))
+    }).bind(undefined, callback, season_number, episode_number))
+}
+
+function get_episodes(show, season_number, callback) {
+	console.log("get_episodes");
+    // should i go fetch new data for the season
+    get_seasons(show, (function(callback, season_number, show) {
+        if (show.season && show.season[season_number] && !show.season[season_number].episode) detail_season(season_number, show, callback)
+        else callback(show);
+    }).bind(undefined, callback, season_number))
+}
+
+function detail_season(season_number, doc, callback) { // TODO cache these queries to mdb like I cache the search queries
+    // fetch new data for the season
+    console.log("updating tvSeasonInfo for season " + season_number)
+    if(!mdb) mdb = require('moviedb')(mdb_API_key);
+    mdb.tvSeasonInfo({
+        id: doc.id,
+        season_number: season_number
+    }, (function(callback, season_number, doc, err, res) {
+        doc = update_doc_with_seasonInfo(doc, res, season_number)
+        callback(doc);
+    }).bind(undefined, callback, season_number, doc))
+}
+
+function update_doc_with_tvInfo(doc, res) {
+	console.log("update_doc_with_tvInfo");
+    // updates the doc with new data for the season
+    if (!doc) doc = {};
+    doc["name"] = res.name;
+    doc["id"] = parseInt(res.id);
+    doc["poster_path"] = res.poster_path;
+    doc["first_air_date"] = res.first_air_date;
+    doc["popularity"] = res.popularity;
+    doc["timestamp"] = Date.now();
+    doc["created_by"] = res.created_by;
+    doc["genres"] = res.genres;
+    doc["last_air_date"] = res.last_air_date;
+    doc["number_of_episodes"] = res.number_of_episodes;
+    doc["number_of_seasons"] = res.number_of_seasons;
+    doc["overview"] = res.overview;
+    doc["popularity"] = res.popularity;
+    doc["vote_average"] = res.vote_average;
+    doc["status"] = res.status;
+    if (!doc["season"]) doc["season"] = {};
+    for (var i = 0, l = res.seasons.length; i < l; i++) {
+        if (!doc["season"]["" + res.seasons[i].season_number + ""]) doc["season"]["" + res.seasons[i].season_number + ""] = {};
+        doc["season"]["" + res.seasons[i].season_number + ""]["season_number"] = res.seasons[i].season_number;
+        doc["season"]["" + res.seasons[i].season_number + ""]["poster_path"] = res.seasons[i].poster_path;
+        doc["season"]["" + res.seasons[i].season_number + ""]["air_date"] = res.seasons[i].air_date;
+    };
+
+    // update database with new data for the season
+    var setModifier = { $set: {} };
+    setModifier.$set["name"] = res.name;
+    setModifier.$set["id"] = parseInt(res.id);
+    setModifier.$set["poster_path"] = res.poster_path;
+    setModifier.$set["first_air_date"] = res.first_air_date;
+    setModifier.$set["popularity"] = res.popularity;
+    setModifier.$set["timestamp"] = Date.now();
+    setModifier.$set["created_by"] = res.created_by;
+    setModifier.$set["genres"] = res.genres;
+    setModifier.$set["last_air_date"] = res.last_air_date;
+    setModifier.$set["number_of_episodes"] = res.number_of_episodes;
+    setModifier.$set["number_of_seasons"] = res.number_of_seasons;
+    setModifier.$set["overview"] = res.overview;
+    setModifier.$set["popularity"] = res.popularity;
+    setModifier.$set["vote_average"] = res.vote_average;
+    setModifier.$set["status"] = res.status;
+    for (var i = 0, l = res.seasons.length; i < l; i++) {
+    	setModifier.$set["season."+res.seasons[i].season_number+".season_number"] = res.seasons[i].season_number;
+    	setModifier.$set["season."+res.seasons[i].season_number+".poster_path"] = res.seasons[i].poster_path;
+    	setModifier.$set["season."+res.seasons[i].season_number+".air_date"] = res.seasons[i].air_date;
+    }
+    db.shows.update({
+    	id: parseInt(doc.id)
+    }, setModifier, { upsert: true }, function (){
+    	console.log(" ... updated "+(doc.name?doc.name:"")+" with tv_info");
+    });
+    return doc;
+}
+
+function search_on_mdb (query, callback) {
+	console.log("search_on_mdb")
+	if(!db.queries_history) db.queries_history = new Datastore({ filename: db_folder+"/queries_history.db", autoload: true });
+	db.queries_history.findOne({ query: query }, (function (callback, query, err, doc) {
+		if(doc){
+			callback(doc.results || false);
+		} else {
+			if(!mdb) mdb = require('moviedb')(mdb_API_key);
+			mdb[(query=='miscTopRatedTvs'?'miscTopRatedTvs':'searchTv')]((query=='miscTopRatedTvs'?{}:{query: query, page: 1, search_type: "ngram"}), (function (callback, query, err, res) {
+					callback(res.results || false);
+
+					// store query
+					db.queries_history.update({
+						query: query
+					}, {
+						query: query,
+						timestamp: Date.now(),
+						results: res.results
+					}, { upsert: true });
+
+					// update shows with info contained in this query
+					if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+					for (var i = 0, l = res.results.length; i < l; i++) {
+						if(good_enough_show(res.results[i])){
+							db.shows.update({
+								id: parseInt(res.results[i].id)
+							}, { $set: {
+								name: res.results[i].name,
+								id: parseInt(res.results[i].id),
+								poster_path: res.results[i].poster_path,
+								first_air_date: res.results[i].first_air_date,
+								vote_average: res.results[i].vote_average,
+								popularity: res.results[i].popularity
+							} }, { upsert: true });
+						}
+					};
+
+				}).bind(undefined, callback, query)
+			);
+		}
+	}).bind(undefined, callback, query));
+}
+
+function get_magnet (show, episode, callback) {
+	console.log("get_magnet");
+	if(episode.magnet)
+		callback(episode.magnet);
+	else{
+		search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
+			var magnet = {
+				"timestamp": Date.now(),
+				"piratebay": (results.length>0?results[0]:false)
 			}
-		} else {
-			callback(show.season[latest_season.season_number].episode[1])
-		}
-	} else {
-		callback(false);
+			callback(magnet);
+
+			var setModifier = { $set: {} };
+			setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
+			db.shows.update({
+				id: parseInt(show.id)
+			}, setModifier, { upsert: true }, function (){
+				console.log(" ... new magnet "+(show.name?show.name:""));
+			});
+
+		}).bind(undefined, show, episode, callback));
 	}
-}
-
-function good_enough_show (show) {
-	return (show.first_air_date && show.first_air_date.split("-")[0]>1990 && show.popularity>0.008 && show.poster_path);
-}
-
-function pretty_string (str) {
-	return str.replace(/[^a-zA-Z]/g, '').length>3;
 }
 
 
@@ -814,11 +893,12 @@ function crawl_piratebay_html (html) {
 /////////////////////////////////////
 //  DEAL WITH ALFRED'S XML OUTPUT  //
 /////////////////////////////////////
+
 function alfred_xml (bundleid) {
 	this.cache = process.env.HOME + "/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow Data/" + bundleid;
-	this.last_result;
+	this.results = [];
+	this.order = [];
 	this.xml = "";
-	this.for_query;
 
 	var XML_CHAR_MAP = {
 		'<': '&lt;',
@@ -842,7 +922,7 @@ function alfred_xml (bundleid) {
 		this.type;
 
 		this.title = "Title";
-		this.subtitle = "Subtitle";
+		this.subtitle = "";
 		this.icontype;
 		this.icon = "";
 
@@ -853,79 +933,268 @@ function alfred_xml (bundleid) {
 		this.cmd;
 		this.copy;
 		this.largetype;
-	}
 
-	this.add = function (uid, title, subtitle, arg) {
-		this.wrap_last();
-		this.last_result = new this.result();
-		this.last_result.uid = uid;
-		this.last_result.title = title;
-		this.last_result.subtitle = subtitle;
-		this.last_result.arg = arg;
-	}
+		this.item_xml = "";
 
-	this.wrap_last = function () {
-		if(this.last_result){
+		this.toXML = function () {
+			if(this.uid) this.uid = escapeXml(this.uid);
+			if(this.arg) this.arg = escapeXml(this.arg);
+			if(this.valid) this.valid = escapeXml(this.valid);
+			if(this.autocomplete) this.autocomplete = escapeXml(this.autocomplete);
+			if(this.type) this.type = escapeXml(this.type);
+			if(this.title) this.title = escapeXml(this.title);
+			if(this.subtitle) this.subtitle = escapeXml(this.subtitle);
+			if(this.icontype) this.icontype = escapeXml(this.icontype);
+			if(this.icon) this.icon = escapeXml(this.icon);
+			if(this.shift) this.shift = escapeXml(this.shift);
+			if(this.fn) this.fn = escapeXml(this.fn);
+			if(this.ctrl) this.ctrl = escapeXml(this.ctrl);
+			if(this.alt) this.alt = escapeXml(this.alt);
+			if(this.cmd) this.cmd = escapeXml(this.cmd);
+			if(this.copy) this.copy = escapeXml(this.copy);
+			if(this.largetype) this.largetype = escapeXml(this.largetype);
 
-			if(this.last_result.uid) this.last_result.uid = escapeXml(this.last_result.uid);
-			if(this.last_result.arg) this.last_result.arg = escapeXml(this.last_result.arg);
-			if(this.last_result.valid) this.last_result.valid = escapeXml(this.last_result.valid);
-			if(this.last_result.autocomplete) this.last_result.autocomplete = escapeXml(this.last_result.autocomplete);
-			if(this.last_result.type) this.last_result.type = escapeXml(this.last_result.type);
-			if(this.last_result.title) this.last_result.title = escapeXml(this.last_result.title);
-			if(this.last_result.subtitle) this.last_result.subtitle = escapeXml(this.last_result.subtitle);
-			if(this.last_result.icontype) this.last_result.icontype = escapeXml(this.last_result.icontype);
-			if(this.last_result.icon) this.last_result.icon = escapeXml(this.last_result.icon);
-			if(this.last_result.shift) this.last_result.shift = escapeXml(this.last_result.shift);
-			if(this.last_result.fn) this.last_result.fn = escapeXml(this.last_result.fn);
-			if(this.last_result.ctrl) this.last_result.ctrl = escapeXml(this.last_result.ctrl);
-			if(this.last_result.alt) this.last_result.alt = escapeXml(this.last_result.alt);
-			if(this.last_result.cmd) this.last_result.cmd = escapeXml(this.last_result.cmd);
-			if(this.last_result.copy) this.last_result.copy = escapeXml(this.last_result.copy);
-			if(this.last_result.largetype) this.last_result.largetype = escapeXml(this.last_result.largetype);
+			// uncomment the following as needed based on what is declared in the workflow
+			// this.shift = this.shift	|| this.subtitle;
+			// this.fn = this.fn		|| this.subtitle;
+			// this.ctrl = this.ctrl	|| this.subtitle;
+			this.alt = this.alt || this.subtitle;
+			this.cmd = this.cmd || this.subtitle;
 
-			this.xml+="\n<item uid=\""+this.last_result.uid+"\" valid=\""+this.last_result.valid+"\" autocomplete=\""+this.last_result.autocomplete+"\""+(this.last_result.type?" type=\""+this.last_result.type+"\"":"")+">";
-			this.xml+="\n<title>"+this.last_result.title+"</title>";
-			this.xml+="\n<subtitle>"+this.last_result.subtitle+"</subtitle>";
-			this.xml+="\n<arg>"+this.last_result.arg+"</arg>";
-			this.xml+="\n<icon"+(this.last_result.icontype?" type=\""+this.last_result.icontype+"\"":"")+">"+this.last_result.icon+"</icon>";
-			if(this.last_result.shift) this.xml+="\n<subtitle mod=\"shift\">"+this.last_result.shift+"</subtitle>";
-			if(this.last_result.fn) this.xml+="\n<subtitle mod=\"fn\">"+this.last_result.fn+"</subtitle>";
-			if(this.last_result.ctrl) this.xml+="\n<subtitle mod=\"ctrl\">"+this.last_result.ctrl+"</subtitle>";
-			if(this.last_result.alt) this.xml+="\n<subtitle mod=\"alt\">"+this.last_result.alt+"</subtitle>";
-			if(this.last_result.cmd) this.xml+="\n<subtitle mod=\"cmd\">"+this.last_result.cmd+"</subtitle>";
-			if(this.last_result.copy) this.xml+="\n<text type=\"copy\">"+this.last_result.copy+"</text>";
-			if(this.last_result.largetype) this.xml+="\n<text type=\"largetype\">"+this.last_result.largetype+"</text>";
-			this.xml+="\n</item>";
+			this.item_xml+="\n<item uid=\""+this.uid+"\" valid=\""+this.valid+"\" autocomplete=\""+this.autocomplete+"\""+(this.type?" type=\""+this.type+"\"":"")+">";
+			this.item_xml+="\n<title>"+this.title+"</title>";
+			if(this.subtitle)this.item_xml+="\n<subtitle>"+this.subtitle+"</subtitle>";
+			if(this.arg)	this.item_xml+="\n<arg>"+this.arg+"</arg>";
+			if(this.icon)	this.item_xml+="\n<icon"+(this.icontype?" type=\""+this.icontype+"\"":"")+">"+this.icon+"</icon>";
+			if(this.shift)	this.item_xml+="\n<subtitle mod=\"shift\">"+this.shift+"</subtitle>";
+			if(this.fn)		this.item_xml+="\n<subtitle mod=\"fn\">"+this.fn+"</subtitle>";
+			if(this.ctrl)	this.item_xml+="\n<subtitle mod=\"ctrl\">"+this.ctrl+"</subtitle>";
+			if(this.alt)	this.item_xml+="\n<subtitle mod=\"alt\">"+this.alt+"</subtitle>";
+			if(this.cmd)	this.item_xml+="\n<subtitle mod=\"cmd\">"+this.cmd+"</subtitle>";
+			if(this.copy) 	this.item_xml+="\n<text type=\"copy\">"+this.copy+"</text>";
+			if(this.largetype) this.item_xml+="\n<text type=\"largetype\">"+this.largetype+"</text>";
+			this.item_xml+="\n</item>";
+
+			return this.item_xml;
 		}
 	}
 
-	this.echo = function () {
-		console.log("echo now\n");
-		this.wrap_last();
-		if(DEBUG)
-			console.log("\n\n<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>");
-		else
-			http_response.end("<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>");
-		log_query_xml("<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>", this.for_query);
-		this.xml = "";
-		this.last_result = undefined;
-		this.for_query = undefined;
+	this.add = function (title, index) {
+		// create result
+		var a_result = new this.result();
+		a_result.title = title;
+
+		// add it to list
+		var new_order = this.results.push(a_result);
+
+		// memorize required index
+		if(index) this.order[index] = new_order-1;
+
+		// send it to work
+		return this.results[new_order-1];
 	}
 
-	function log_query_xml (xml, query) {
-		if(!db.xml) db.xml = new Datastore({ filename: db_folder+"/xml.db", autoload: true });
+	this.echo = function () {
+		for (var i = 0, l = this.order.length; i < l; i++) {
+			if(this.order[i]!=null){
+				var result_xml = this.results[this.order[i]].toXML();
+				this.xml += result_xml;
+			}
+		};
+		this.order.sort();
+		for (var i = this.order.length - 1; i >= 0; i--) {
+			if(this.order[i]!=null)
+				this.results.splice(this.order[i], 1);
+		};
+		for (var i = 0, l = this.results.length; i < l; i++) {
+			this.xml += this.results[i].toXML();
+		};
 
-		db.xml.update({
-			query: query
-		}, {
-			query: query,
-			timestamp: Date.now(),
-			xml: xml
-		}, { upsert: true });
+		var return_str = "<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>";
 
+		this.xml = "";
+		this.results = [];
+		this.order = [];
+
+		return return_str;
 	}
 }
+
+
+///////////////////////
+//  POST-PROCESSING  //
+///////////////////////
+
+function exit_server () {
+	if(!is_streaming){
+		post_processing();
+
+		// exit (wait for all async processes to be done, stops trying if an http request comes in)
+		exitInterval = setInterval(function () {
+			if(dontLeave==0){
+				console.log("bye bye");
+				fs.unlink(node_pid);
+				process.exit();
+			}
+		}, 5000);
+	} else {
+		timeout = setTimeout(exit_server, server_life);
+	}
+}
+
+function post_processing () {
+	console.log("post processing");
+	// clean & optimize db
+	// db.shows.ensureIndex({ fieldName: 'id', unique: true }, function (err) {});
+	db.queries_history.ensureIndex({ fieldName: 'query', unique: true }, function (err) {});
+	for (var i = db.length - 1; i >= 0; i--) {
+		db[i].persistence.compactDatafile;
+	};
+
+	// dl & crop images
+	if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
+	db.shows.find({}, function (err, docs) {
+		for (var i = docs.length - 1; i >= 0; i--) {
+			dl_image(imgs_folder+"/"+docs[i].id, docs[i].poster_path);
+		};
+	});
+}
+
+function dl_image (img_name, url) {
+	dontLeave++;
+	fs.exists(img_name+".jpg", (function  (img_name, url, exists) {
+		if (!exists) {
+			if(!easyimg) easyimg = require('easyimage');
+			request("https://image.tmdb.org/t/p/w60_or_h91"+url).pipe(fs.createWriteStream(img_name+"-nocrop.jpg")).on('close', (function (img_name) {
+				// crop all images to alfred format
+				easyimg.thumbnail({
+					src:img_name+"-nocrop.jpg", dst:img_name+".jpg",
+					width:60, height:60
+				}).then(function(image) {
+					fs.unlink(imgs_folder+"/"+image.name.replace(".jpg", "-nocrop.jpg"));
+					dontLeave--;
+				}, function (err) {
+					console.log(err);
+				});
+			}).bind(undefined, img_name));
+		} else {
+			dontLeave--;
+		}
+	}).bind(undefined, img_name, url));
+}
+
+
+///////////////////////
+//  FAVORITE TOGGLE  //
+///////////////////////
+
+function toggle_fav (id, bool, reply) {
+	if(reply) http_response.end('ok');
+	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+	var fav = (bool==1||bool==true);
+	db.shows.update({ id: parseInt(id) }, { $set: { fav: fav } }, {}, (function (err, numReplaced) {
+		console.log(fav?"added to favorites":"removed from favorites")
+	}).bind(undefined, fav));
+}
+
+
+///////////////////////
+//  STREAMING LOGIC  //
+///////////////////////
+
+function handle_stream (info, id){
+	http_response.end('ok');
+	is_streaming = true;
+
+	// parse info
+	stream_summary.showId = id;
+	stream_summary.showName = info.split(', s');
+	stream_summary.season = stream_summary.showName[1].split('e');
+	stream_summary.episode = parseInt(stream_summary.season[1].split(':')[0]);
+	stream_summary.season = parseInt(stream_summary.season[0]);
+	stream_summary.showName = stream_summary.showName[0].trim();
+	stream_summary.monitorCounter = 0;
+	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
+
+	if(!Netcat) Netcat = require('node-netcat');
+	vlc_monitoring = setInterval(monitor_vlc, 2000);
+}
+
+function monitor_vlc (){
+	var client = Netcat.client(vlc_tcp[1], vlc_tcp[0]);
+	var full_data = "";
+	var get_length = (stream_summary.progress && !stream_summary.duration && (stream_summary.monitorCounter++)>7);
+
+	client.on('open', function () {
+		client.send((get_length?'get_length':'get_time')+'\n', true);
+	});
+
+	client.on('data', function (data) {
+		full_data += data.toString('ascii');
+	});
+
+	client.on('error', function (err) {
+		if(err=="Error: connect ECONNREFUSED")
+			finish_streaming();
+		else
+			console.log("err: "+err);
+	});
+
+	client.on('close', function () {
+		var number = full_data.match(/[0-9]+$/m);
+		if(number){
+			if(get_length){
+				console.log("duration: "+number[0]+"s ("+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+")");
+				stream_summary.duration = number[0];
+			}
+			else{
+				if(!stream_summary.progress) console.log("Playback started, tracking progress for "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode);
+				if(number[0]>0) stream_summary.progress = number[0];
+			}
+		}
+	});
+
+	client.start();
+}
+
+function finish_streaming (){
+	clearInterval(vlc_monitoring);
+	is_streaming = false;
+	console.log("finish");
+
+	//check that we have all the data we need and log it to db
+	if(stream_summary.showId && stream_summary.season && stream_summary.episode && stream_summary.duration && stream_summary.progress){
+		var setModifier = { $set: {} };
+		setModifier.$set["last_watched.season"] = stream_summary.season;
+		setModifier.$set["last_watched.episode"] = stream_summary.episode;
+		setModifier.$set["last_watched.progress"] = stream_summary.progress;
+		setModifier.$set["last_watched.duration"] = stream_summary.duration;
+		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".duration"] = stream_summary.duration;
+		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".progress"] = stream_summary.progress;
+
+		// TODO if it a few episodes in a row are watched, add to favorites
+		// TODO prepare next episode by checking if everything is up to date (tvinfo, seasoninfo, what is the next ep, fetch magnet for next)
+
+		db.shows.update({
+			id: parseInt(stream_summary.showId)
+		}, setModifier, {}, (function (stream_summary, err, numReplaced, newDoc){
+			console.log("logging "+stream_summary.showName+" at "+Math.round(100*stream_summary.progress/stream_summary.duration)+"%");
+		}).bind(undefined, stream_summary));
+	}
+
+	// kill peerflix
+	fs.readFile(peerflix_pid, 'utf8', function (err, data) {
+		process.kill(data, 'SIGINT');
+		console.log("peerflix killed");
+	});
+
+	// clean peerflix & vlc PID
+	fs.unlink(peerflix_pid);
+	fs.unlink(vlc_pid);
+
+	console.log('all done');
+}
+
 
 
 
@@ -934,21 +1203,6 @@ function alfred_xml (bundleid) {
 the movie DB
 	image sizes: https://image.tmdb.org/t/p/{size}/iRDNn9EHKuBhGa77UBteazvsZa1.jpg
 		available: w60_or_h91, w92, w130, w185, w300, w396, w780, w1280, original
-
-Bash commands
-
-#start peerflix
-peerflix "magnet:?xt=urn:btih:513e51db00d3fc91c0f8c5090749f058cd0b263d&dn=Homeland+S03E05+HDTV+x264-KILLERS+%5Beztv%5D&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80&tr=udp%3A%2F%2Ftracker.istole.it%3A6969&tr=udp%3A%2F%2Fopen.demonii.com%3A1337" -q -f /private/tmp/torrent-stream/ -h 127.0.0.1 -p 8375
-
-# start vlc
-/Applications/VLC.app/Contents/MacOS/VLC -I macosx --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8765 --meta-title "Show Name, SXXEXX: Name of the episode" http://127.0.0.1:8375/
-
-# query vlc
-echo get_time | nc 127.0.0.1 8765
-echo get_length | nc 127.0.0.1 8765
-#or processed:
-time=$(echo get_time | nc 127.0.0.1 8765 | sed -n '3p')
-time=${time:2}
 
 # stream from VLC to HTML <video><source src="http://localhost:8081/test" type="video/ogg" /></video>
 /Applications/VLC.app/Contents/MacOS/VLC ~/Movies/New.Girl.S04E03.720p.HDTV.x264-KILLERS.mkv --sout '#transcode{vcodec=theo,vb=2000,scale=1,acodec=vorb,ab=128,channels=2,samplerate=44100}:http{mux=ogg,dst=:8081/test}'
