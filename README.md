@@ -14,6 +14,6 @@ First and foremost, [download the workflow](https://github.com/Sheraff/tvshows-a
 
 This workflow makes use of [NodeJS](http://nodejs.org/), if you don’t know what it is, you probably don’t have it. If you don’t like to tinker with your computer, your journey ends here :-(
 
-It also uses [peerflix](https://github.com/mafintosh/peerflix)(`sudo npm install -g peerflix`), [VLC](http://www.videolan.org/vlc/index.html)(just a media player to download) and [terminal notifier](https://github.com/alloy/terminal-notifier)(`sudo gem install terminal-notifier`).
+It also uses [peerflix](https://github.com/mafintosh/peerflix) (`sudo npm install -g peerflix`), [VLC](http://www.videolan.org/vlc/index.html) (just a media player to download) and [terminal notifier](https://github.com/alloy/terminal-notifier) (`sudo gem install terminal-notifier`).
 
 So if you have all that in the regular locations, it should work right out of the box.
