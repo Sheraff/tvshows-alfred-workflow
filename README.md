@@ -1,6 +1,7 @@
-tvshows-alfred-workflow (early Alpha version)
+TV Shows manager (Beta version)
 =======================
 
-manage your favorite shows with Alfred App
+Stream your favorite shows right from Alfred. Remember which episode you’re at (and where you stopped in it), know if a new episode is out, download for later...
 
-warning: this is an early alpha version
+Everything you want for TV Shows is in this workflow.
+
