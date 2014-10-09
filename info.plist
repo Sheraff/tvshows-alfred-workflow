@@ -16,6 +16,22 @@
 				<key>modifiersubtext</key>
 				<string></string>
 			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>4A230223-7330-4A5A-AA51-3345AD645318</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>53C2BB90-C486-4053-BA3A-952489970792</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
 		</array>
 	</dict>
 	<key>createdby</key>
@@ -28,6 +44,41 @@
 	<string>TV Show Manager</string>
 	<key>objects</key>
 	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>escaping</key>
+				<integer>100</integer>
+				<key>script</key>
+				<string>./handler.sh "{query}"
+</string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>B54E9934-471D-482F-9491-17A3D2E5BCB5</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>escaping</key>
+				<integer>100</integer>
+				<key>script</key>
+				<string>./cmd_handler.sh "{query}"</string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>4A230223-7330-4A5A-AA51-3345AD645318</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
 		<dict>
 			<key>config</key>
 			<dict>
@@ -60,17 +111,14 @@
 			<key>config</key>
 			<dict>
 				<key>escaping</key>
-				<integer>100</integer>
-				<key>script</key>
-				<string>./handler.sh "{query}"
-</string>
+				<integer>127</integer>
 				<key>type</key>
 				<integer>0</integer>
 			</dict>
 			<key>type</key>
 			<string>alfred.workflow.action.script</string>
 			<key>uid</key>
-			<string>B54E9934-471D-482F-9491-17A3D2E5BCB5</string>
+			<string>53C2BB90-C486-4053-BA3A-952489970792</string>
 			<key>version</key>
 			<integer>0</integer>
 		</dict>
@@ -79,6 +127,16 @@
 	<string></string>
 	<key>uidata</key>
 	<dict>
+		<key>4A230223-7330-4A5A-AA51-3345AD645318</key>
+		<dict>
+			<key>ypos</key>
+			<real>130</real>
+		</dict>
+		<key>53C2BB90-C486-4053-BA3A-952489970792</key>
+		<dict>
+			<key>ypos</key>
+			<real>250</real>
+		</dict>
 		<key>B54E9934-471D-482F-9491-17A3D2E5BCB5</key>
 		<dict>
 			<key>ypos</key>
@@ -87,7 +145,7 @@
 		<key>FBA63DBB-444B-46FE-9D20-370FFA23989A</key>
 		<dict>
 			<key>ypos</key>
-			<real>10</real>
+			<real>130</real>
 		</dict>
 	</dict>
 	<key>webaddress</key>

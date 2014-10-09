@@ -22,6 +22,7 @@ function start_server {
 	fi
 }
 
+
 # case "l" (originally) for large-type
 if [[ $case_letter == "l" ]] ; then
 	qlmanage -p "${cache}/summaries/$QUERY.rtf"
@@ -40,8 +41,9 @@ elif [[ $case_letter == "m" ]] ; then
 
 	# parsing input
 	id=$(echo $QUERY| cut -d " " -f1)
-	magnet=$(echo ${QUERY:${#id}}| cut -d " " -f1)
-	title=${QUERY:$[${#magnet}+${#id}]+2}
+	progress=$(echo ${QUERY:${#id}}| cut -d " " -f1)
+	magnet=$(echo ${QUERY:$[${#progress}+${#id}]+2}| cut -d " " -f1)
+	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
 
 	# send notification
 	terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${cache}/imgs/$id.jpg"
@@ -54,7 +56,7 @@ elif [[ $case_letter == "m" ]] ; then
 
 	# wait for video to be available and then start VLC with tcp connection
 	until out=$(curl --head -f -s 127.0.0.1:8375); do :; done
-	/Applications/VLC.app/Contents/MacOS/VLC -I macosx --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "$title" http://127.0.0.1:8375/ &
+	/Applications/VLC.app/Contents/MacOS/VLC -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "$title" http://127.0.0.1:8375/ &
 	echo $! > "${VLC_PID}"
 
 	# wait for server response (in case node isn't done launching yet)
