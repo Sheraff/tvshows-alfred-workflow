@@ -36,8 +36,8 @@ elif [[ $case_letter == "f" ]] ; then
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
 	# remove existing instances of peerflix & vlc (that we're responsible for)
-	if [[ ! -f ${PHP_PID_FILE} ]]; 	then kill -SIGKILL $(cat "${PEERFLIX_PID}"); fi
-	if [[ ! -f ${VLCFILE} ]]; 		then kill -SIGKILL $(cat "${VLC_PID}"); fi # first time around, i decided not to add this line, second time, i didn't remember why so i added it... maybe there was a good reason
+	if [[ ! -f ${PHP_PID_FILE} ]]; 	then kill -9 $(cat "${PEERFLIX_PID}"); fi
+	if [[ ! -f ${VLCFILE} ]]; 		then kill -9 $(cat "${VLC_PID}"); fi # first time around, i decided not to add this line, second time, i didn't remember why so i added it... maybe there was a good reason
 
 	# parsing input
 	id=$(echo $QUERY| cut -d " " -f1)

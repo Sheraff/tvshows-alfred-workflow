@@ -2,17 +2,15 @@ var weird_block1 = 0;
 /*
  * TODO:
  * read user prefs from file?
- * 'miscTopRatedTvs' should only be adding to the list of already watched shows (in the case of empty query)
  * remove old db entries in post-processing
  * fetch latest episodes for watched shows in post-processing
  * query piratebay as early as possible (if the user is almost up to date, the desired episode is probably on the search page without specifying sXXeXX)
  * switch to `sips` for image croping: sips -c 60 60 imagename.jpg
- * add a no-result case
+ * better no-result case
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
- * take control of ordering in xml result (feels too messy otherwise here)
+ * problem with XML ordering (appears that last result ends up first)
  * add timeout on all LOCAL AND MOVIE DATABASE RELATED functions
- * db entries keep geting replaced
  * if VLC stops playing for a while, log progress
  *
  */
@@ -300,11 +298,11 @@ function complete_output_2 (doc, callup, calldown){
 	//what to watch
 	callup();
 	find_ep_to_watch(doc, (function (callup, calldown, episode, doc) {
+		var item = w.add("", 1)
 		if(episode){
 			//get magnet
 			callup();
 			get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
-				var item = w.add("", 1);
 				if(episode.progress && episode.progress>30){
 					if(magnet.piratebay){
 						item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
@@ -338,7 +336,6 @@ function complete_output_2 (doc, callup, calldown){
 				callback();
 			}).bind(undefined, calldown, episode, doc))
 		} else {
-			var item = w.add("", 1)
 			if(show.status == "Ended"){
 				item.title = "You have finished this show. Congratulation ;-)";
 				item.subtitle = "Press Enter to mark as not watched";
@@ -350,6 +347,7 @@ function complete_output_2 (doc, callup, calldown){
 				} else {
 					item.subtitle = "but this show hasn't ended yet"
 				}
+				item.valid="NO";
 			}
 		}
 
@@ -362,9 +360,12 @@ function complete_output_2 (doc, callup, calldown){
 				date = date ? " "+date : "'s air date not set yet";
 				var item = w.add(first+" episode"+date, 2);
 				item.subtitle = subtitle;
+				if(!date)
+					item.valid="NO";
 			} else {
 				if(doc.status){
 					var item = w.add("---", 2);
+					item.valid="NO";
 					if(doc.status != "Ended")
 						item.subtitle = "Next episode's date not set yet";
 					else
@@ -388,7 +389,7 @@ function complete_output_2 (doc, callup, calldown){
 			item.icon = "what.png";
 
 			//favorite toggle
-			var item = w.add("", 5)
+			var item = w.add("", 4)
 			if(doc.fav==true){
 				item.title = "Remove "+doc.name+" from my favorites";
 				item.arg = "f0"+doc.id;
@@ -915,16 +916,16 @@ function alfred_xml (bundleid) {
 	}
 
 	this.result = function () {
-		this.uid = "";
-		this.arg = "";
+		this.uid;
+		this.arg;
 		this.valid = "YES";
-		this.autocomplete = "";
+		this.autocomplete;
 		this.type;
 
 		this.title = "Title";
-		this.subtitle = "";
+		this.subtitle;
 		this.icontype;
-		this.icon = "";
+		this.icon;
 
 		this.shift;
 		this.fn;
@@ -935,6 +936,7 @@ function alfred_xml (bundleid) {
 		this.largetype;
 
 		this.item_xml = "";
+		this.indexed = false;
 
 		this.toXML = function () {
 			if(this.uid) this.uid = escapeXml(this.uid);
@@ -961,7 +963,7 @@ function alfred_xml (bundleid) {
 			this.alt = this.alt || this.subtitle;
 			this.cmd = this.cmd || this.subtitle;
 
-			this.item_xml+="\n<item uid=\""+this.uid+"\" valid=\""+this.valid+"\" autocomplete=\""+this.autocomplete+"\""+(this.type?" type=\""+this.type+"\"":"")+">";
+			this.item_xml+="\n<item "+(this.uid?"uid=\""+this.uid+"\" ":"")+"valid=\""+this.valid+"\" "+(this.autocomplete?"autocomplete=\""+this.autocomplete+"\" ":"")+(this.type?"type=\""+this.type+"\"":"")+">";
 			this.item_xml+="\n<title>"+this.title+"</title>";
 			if(this.subtitle)this.item_xml+="\n<subtitle>"+this.subtitle+"</subtitle>";
 			if(this.arg)	this.item_xml+="\n<arg>"+this.arg+"</arg>";
@@ -983,6 +985,7 @@ function alfred_xml (bundleid) {
 		// create result
 		var a_result = new this.result();
 		a_result.title = title;
+		if(index) a_result.indexed = true;
 
 		// add it to list
 		var new_order = this.results.push(a_result);
@@ -1001,13 +1004,9 @@ function alfred_xml (bundleid) {
 				this.xml += result_xml;
 			}
 		};
-		this.order.sort();
-		for (var i = this.order.length - 1; i >= 0; i--) {
-			if(this.order[i]!=null)
-				this.results.splice(this.order[i], 1);
-		};
 		for (var i = 0, l = this.results.length; i < l; i++) {
-			this.xml += this.results[i].toXML();
+			if(!this.results[i].indexed)
+				this.xml += this.results[i].toXML();
 		};
 
 		var return_str = "<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>";
@@ -1152,6 +1151,9 @@ function monitor_vlc (){
 				if(number[0]>0) stream_summary.progress = number[0];
 			}
 		}
+		// if(stream_summary.progress && stream_summary.duration && stream_summary.progress+10>stream_summary.duration){
+		// 	kill_peerflix();
+		// }
 	});
 
 	client.start();
@@ -1183,10 +1185,7 @@ function finish_streaming (){
 	}
 
 	// kill peerflix
-	fs.readFile(peerflix_pid, 'utf8', function (err, data) {
-		process.kill(data, 'SIGINT');
-		console.log("peerflix killed");
-	});
+	kill_peerflix();
 
 	// clean peerflix & vlc PID
 	fs.unlink(peerflix_pid);
@@ -1195,6 +1194,43 @@ function finish_streaming (){
 	console.log('all done');
 }
 
+function kill_peerflix(){
+	fs.readFile(peerflix_pid, 'utf8', function (err, data) {
+		process.kill(data, 'SIGINT');
+		console.log("peerflix killed");
+	});
+}
+
+
+///////////////////////////////////////
+//  COLLECTING ANONYMOUS USAGE DATA  //
+///////////////////////////////////////
+setTimeout(anonymous, 5000);
+var anonymous_id = process.env.HOME + "/Library/Application Support/Alfred 2/Workflow Data/florian.show"
+function anonymous () {
+	fs.exists(anonymous_id, function (exist) {
+		if(!exist) fs.mkdir(anonymous_id, write_anonymous_id);
+		else{
+			fs.exists(anonymous_id+"/id", function (exist) {
+				if (exist){
+					fs.readFile(anonymous_id+"/id", 'utf8', function (err, data) {
+						send_anonymous(data);
+					})
+				} else
+					write_anonymous_id();
+			})
+		}
+	})
+}
+function send_anonymous(guid) {
+	if(!request) request = require('request');
+	request("http://alfred.florianpellet.com/show/show_ping.php?guid="+guid, function () {});
+}
+function write_anonymous_id () {
+	var guid = ""+Date.now()+(process.env.HOME.split("/").pop());
+	fs.writeFile(anonymous_id+"/id", guid);
+	send_anonymous(guid);
+}
 
 
 
