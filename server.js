@@ -11,6 +11,8 @@ var weird_block1 = 0;
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * add timeout on all LOCAL AND MOVIE DATABASE RELATED functions
  * if VLC stops playing for a while, log progress
+ * allow for launching a new ep if peerflix / vlc are still active
+ * better ordering (the ones w/ an episode to watch on top)
  *
  */
 
@@ -408,16 +410,14 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 
 function complete_output (result, callup, calldown) {
 	console.log("complete_output");
-	//this might take some time notification
-	console.log("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":""));
-	if(!exec) exec = require('child_process').exec;
-	// exec(("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":"")), function(){});
-	exec("/usr/bin/terminal-notifier -message coucou", function(){});
 	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
 	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
 		if(doc){
 			complete_output_2(doc, callup, calldown)
 		} else {
+			//this might take some time notification
+			if(!exec) exec = require('child_process').exec;
+			exec(("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, might take a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":"")), function(){});
 			detail_show(result, (function (callup, calldown, doc) {
 				complete_output_2 (doc, callup, calldown)
 			}).bind(undefined, callup, calldown));

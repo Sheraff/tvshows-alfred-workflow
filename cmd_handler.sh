@@ -14,11 +14,16 @@ elif [[ $case_letter == "f" ]] ; then
 
 # case "m" for magnet (default with progress=0)
 elif [[ $case_letter == "m" ]] ; then
+	# remove existing instances of peerflix & vlc (that we're responsible for)
+	if [[ -f ${PEERFLIX_PID} ]]; 	then kill -9 $(cat "${PEERFLIX_PID}"); fi
+	if [[ -f ${VLC_PID} ]]; 		then kill -9 $(cat "${VLC_PID}"); fi
+	while [[ -f ${VLC_PID} ]] && [[ -f ${VLC_PID} ]]; do :; done
+
 	id=$(echo $QUERY| cut -d " " -f1)
 	progress=$(echo ${QUERY:${#id}}| cut -d " " -f1)
 	magnet=$(echo ${QUERY:$[${#progress}+${#id}]+2}| cut -d " " -f1)
 	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
 
-	./handler.sh "m$id 0 $magnet $title"
+	echo "m$id 0 $magnet $title"
 
 fi
