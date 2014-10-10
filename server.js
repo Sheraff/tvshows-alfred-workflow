@@ -9,7 +9,6 @@ var weird_block1 = 0;
  * better no-result case
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
- * problem with XML ordering (appears that last result ends up first)
  * add timeout on all LOCAL AND MOVIE DATABASE RELATED functions
  * if VLC stops playing for a while, log progress
  *
@@ -43,7 +42,7 @@ var http_response;
 
 // user prefs
 var mdb_API_key = "26607a596b2ac49958a20ec3ab295259";
-var percent_to_consider_watched = .95;
+var percent_to_consider_watched = .85;
 
 // alfred
 var w = new alfred_xml("florian.shows");
@@ -327,13 +326,27 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 	if(episode_number){
 		get_specific_episode(doc, season_number, episode_number, (function (calldown, episode, show) {
 			if(episode.episode_number && episode.episode_number != 0){
-				var item = w.add(formatted_episode_number(episode.episode_number)+" — "+episode.name);
+				var item = w.add(( episode.name && pretty_string(episode.name) ) ? episode.name : show.name+" "+formatted_episode_number(episode));
 				if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now())
 					item.subtitle = "Will air "+pretty_date(episode.air_date)
-				else if(episode.magnet && episode.magnet.piratebay)
-					item.subtitle = "Enter to stream right now and set this episode as your current progression";
-				else
-					item.subtitle = "cul & bite";
+				else if(episode.magnet && episode.magnet.piratebay){
+					if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100){
+						item.subtitle = "Resume watching at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )";
+						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )";
+					} else {
+						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )";
+					}
+					item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
+					item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
+				} else {
+					if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
+						item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
+					else if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100)
+						item.subtitle = "You watched "+percent_progress(episode)+"% of this episode, but it isn't available on piratebay anymore. Press Enter to mark as watched."
+					else
+						item.subtitle = "Not available on piratebay";
+					item.valid = "NO";
+				}
 			} else
 				no_result();
 				calldown();
@@ -341,7 +354,6 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 	} else if(season_number && season_number != 0){
 		get_episodes(doc, season_number, (function (calldown, season_number, show) {
 			if(show.season[""+season_number+""] && show.season[""+season_number+""].episode){
-				//TODO get magnet for entire season with thepiratebay search "show.name sXX*"
 				var keys = Object.keys(show.season[""+season_number+""].episode).sort(function (a, b) {
 					a=parseInt(a);
 					b=parseInt(b);
@@ -349,9 +361,16 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 				})
 				for (var i = 0, l = keys.length; i < l; i++) {
 					if(parseInt(keys[i])!=0){
-						var item = w.add(show.season[""+season_number+""].episode[""+keys[i]+""].episode_number+" - "+show.season[""+season_number+""].episode[""+keys[i]+""].name);
+						var episode = show.season[""+season_number+""].episode[""+keys[i]+""];
+						var item = w.add(episode.episode_number+" - "+(pretty_string(episode.name) ? episode.name : "Episode "+episode.episode_number), i+1);
 						item.autocomplete = show.name + " s" + leading_zero(season_number) + "e" + leading_zero(show.season[""+season_number+""].episode[""+keys[i]+""].episode_number);
 						item.valid = "NO";
+						if(show.last_watched && show.last_watched.season == season_number && show.last_watched.episode == episode.episode_number){
+							item.subtitle = "This is the last episode you watched. You stopped at "+percent_progress(episode)+"%.";
+						}
+						if(date_from_tmdb_format(episode.air_date)>Date.now()){
+							item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
+						}
 					}
 				};
 				get_magnets_for_season(show, season_number, function () {});
@@ -370,9 +389,12 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 				if(parseInt(keys[i])!=0){
 					var std_name = "Season "+show.season[""+keys[i]+""].season_number;
 					var name = show.season[""+keys[i]+""].name || false;
-					var item = w.add(!name || simplify_str(name)==simplify_str(std_name) ? std_name : std_name+": "+name, i);
+					var item = w.add(!name || simplify_str(name)==simplify_str(std_name) ? std_name : std_name+": "+name, i+1);
 					item.valid = "NO";
 					item.autocomplete = show.name + " s" + leading_zero(show.season[""+keys[i]+""].season_number);
+					if(show.last_watched && show.last_watched.season == show.season[""+keys[i]+""].season_number ){
+						item.subtitle = "You last watched the "+st_nd_rd_th(show.last_watched.episode)+" episode of this season.";
+					}
 				}
 			};
 			calldown();
@@ -465,8 +487,7 @@ function complete_output_2 (doc, callup, calldown){
 				date = date ? " "+date : "'s air date not set yet";
 				var item = w.add(first+" episode"+date, 2);
 				item.subtitle = subtitle;
-				if(!date)
-					item.valid="NO";
+				item.valid="NO";
 			} else {
 				if(doc.status){
 					var item = w.add("---", 2);
@@ -489,7 +510,7 @@ function complete_output_2 (doc, callup, calldown){
 			make_preview_page(doc.id, doc.name, genres, rating, doc.status, year, doc.overview);
 			var item = w.add(doc.overview, 3);
 			item.subtitle = stars+" ("+year+") "+genres+" — "+doc.status;
-			item.arg = "l"+doc.id
+			item.arg = "l"+doc.id+" "+doc.name
 			item.largetype = doc.overview;
 			item.icon = "what.png";
 
@@ -573,6 +594,15 @@ function is_doc_in_docs (id, docs) {
 		if(docs[i].id == id) return true;
 	};
 	return false;
+}
+
+function st_nd_rd_th (nb) {
+	switch ((""+nb+"").slice(-1)){
+		case 1: return ""+nb+"st"; break
+		case 2: return ""+nb+"nd"; break
+		case 3: return ""+nb+"rd"; break
+		default: return ""+nb+"th";
+	}
 }
 
 function make_preview_page (id, showName, genres, rating, status, year, text){
@@ -1293,7 +1323,7 @@ function handle_stream (info, id){
 function monitor_vlc (){
 	var client = Netcat.client(vlc_tcp[1], vlc_tcp[0]);
 	var full_data = "";
-	var get_length = (stream_summary.progress && !stream_summary.duration && (stream_summary.monitorCounter++)>7);
+	var get_length = (stream_summary.progress && !stream_summary.duration && stream_summary.monitorCounter>2);
 
 	client.on('open', function () {
 		client.send((get_length?'get_length':'get_time')+'\n', true);
@@ -1319,6 +1349,7 @@ function monitor_vlc (){
 			}
 			else{
 				if(!stream_summary.progress) console.log("Playback started, tracking progress for "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode);
+				else stream_summary.monitorCounter++;
 				if(number[0]>0) stream_summary.progress = number[0];
 			}
 		}
@@ -1333,17 +1364,30 @@ function monitor_vlc (){
 function finish_streaming (){
 	clearInterval(vlc_monitoring);
 	is_streaming = false;
+
+	// kill peerflix
+	kill_peerflix();
+
+	// clean peerflix & vlc PID
+	fs.unlink(peerflix_pid);
+	fs.unlink(vlc_pid);
+
 	console.log("finish");
 
 	//check that we have all the data we need and log it to db
 	if(stream_summary.showId && stream_summary.season && stream_summary.episode && stream_summary.duration && stream_summary.progress){
 		var setModifier = { $set: {} };
-		setModifier.$set["last_watched.season"] = stream_summary.season;
-		setModifier.$set["last_watched.episode"] = stream_summary.episode;
-		setModifier.$set["last_watched.progress"] = stream_summary.progress;
-		setModifier.$set["last_watched.duration"] = stream_summary.duration;
-		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".duration"] = stream_summary.duration;
-		setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".progress"] = stream_summary.progress;
+		if(stream_summary.season && stream_summary.episode){
+			setModifier.$set["last_watched.season"] = stream_summary.season;
+			setModifier.$set["last_watched.episode"] = stream_summary.episode;
+			clean_watch_log_after(stream_summary.showId, stream_summary.season, stream_summary.episode);
+		}
+		if(stream_summary.progress && stream_summary.duration){
+			setModifier.$set["last_watched.progress"] = stream_summary.progress;
+			setModifier.$set["last_watched.duration"] = stream_summary.duration;
+			setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".duration"] = stream_summary.duration;
+			setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".progress"] = stream_summary.progress;
+		}
 
 		// TODO if it a few episodes in a row are watched, add to favorites
 		// TODO prepare next episode by checking if everything is up to date (tvinfo, seasoninfo, what is the next ep, fetch magnet for next)
@@ -1353,16 +1397,32 @@ function finish_streaming (){
 		}, setModifier, {}, (function (stream_summary, err, numReplaced, newDoc){
 			console.log("logging "+stream_summary.showName+" at "+Math.round(100*stream_summary.progress/stream_summary.duration)+"%");
 		}).bind(undefined, stream_summary));
+
+
 	}
 
-	// kill peerflix
-	kill_peerflix();
-
-	// clean peerflix & vlc PID
-	fs.unlink(peerflix_pid);
-	fs.unlink(vlc_pid);
-
 	console.log('all done');
+}
+
+function clean_watch_log_after (show_id, season_number, episode_number) {
+	db.shows.findOne({ id: parseInt(show_id) }, (function (season_number, episode_number, err, doc) {
+		var setModifier = { $unset: {} };
+		var season_keys = Object.keys(doc.season);
+		for (var i = 0, l = season_keys.length; i < l; i++) {
+			if(parseInt(season_keys[i])>=season_number){
+				var episode_keys = Object.keys(doc.season[""+season_keys[i]+""].episode);
+				for (var j = 0, m = episode_keys.length; j < m; j++) {
+					if((parseInt(season_keys[i])==season_number && parseInt(episode_keys[j])>episode_number) || parseInt(season_keys[i])>season_number){
+						setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".duration"] = true;
+						setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".progress"] = true;
+					}
+				};
+			}
+		}
+		db.shows.update({
+			id: parseInt(doc.id)
+		}, setModifier, {}, function(){});
+	}).bind(undefined, season_number, episode_number));
 }
 
 function kill_peerflix(){
