@@ -27,7 +27,7 @@ function start_server {
 if [[ $case_letter == "l" ]] ; then
 	id=$(echo $QUERY| cut -d " " -f1)
 	name=${QUERY:${#id}}
-	(qlmanage -p "${cache}/summaries/$id.rtf"; osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name\"")
+	(qlmanage -p "${cache}/summaries/$id.rtf"; osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \"")
 
 # case "f" for favorite
 elif [[ $case_letter == "f" ]] ; then
@@ -35,7 +35,7 @@ elif [[ $case_letter == "f" ]] ; then
 	id=$(echo $QUERY| cut -d " " -f1)
 	name=${QUERY:${#id}}
 	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}"); do :; done
-	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name\""
+	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
