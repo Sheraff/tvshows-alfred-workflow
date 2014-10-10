@@ -30,8 +30,10 @@ if [[ $case_letter == "l" ]] ; then
 # case "f" for favorite
 elif [[ $case_letter == "f" ]] ; then
 	start_server
-	until out=$(curl 127.0.0.1:8374 -s -d "fav=${QUERY:1}" -d "bool=${QUERY:0:1}"); do :; done
-	echo " "
+	id=$(echo $QUERY| cut -d " " -f1)
+	name=${QUERY:${#id}}
+	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}"); do :; done
+	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name\""
 
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
