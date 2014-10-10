@@ -67,6 +67,8 @@ var timeout = setTimeout(exit_server, server_life);
 var exitInterval;
 var dontLeave = 0;
 var countDownToEcho = 0;
+var delayed_images = [];
+var delayed_images_interval;
 
 
 //////////////
@@ -125,6 +127,13 @@ function initialize () {
 		if(!request) request = require('request');
 		if(!exec) exec = require('child_process').exec;
 		if(!fs.existsSync(summaries_folder)) fs.mkdirSync(summaries_folder);
+		if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
+		delayed_images_interval = setInterval(function () {
+			for (var i = Math.min(5, delayed_images.length); i > 0; i--) {
+				var img = delayed_images.shift();
+				dl_image(imgs_folder+"/"+img.id, img.path);
+			};
+		}, 2000);
 	}, 2000);
 }
 
@@ -134,7 +143,7 @@ function initialize () {
 ///////////////////////
 
 function use_query (query) {
-	console.log("use_query");
+	console.log("use_query: "+query);
 	query = query.trim();
 	if(query && query!="miscTopRatedTvs")
 		search_for_show(query)
@@ -173,8 +182,25 @@ function homepage() {
 
 function search_for_show (query) {
 	console.log("search_for_show");
+
+	//sXXeXX browsing case
+	var last_word = query.split(" ").pop();
+	var corrected_query, season, episode;
+	if((/(^s[0-9]{0,2}$)|(^s[0-9]{1,2}e[0-9]{0,2}$)/i).test(last_word)){
+		corrected_query = query.substring(0, query.lastIndexOf(" "));
+		console.log("corrected query: "+corrected_query);
+		if(last_word.length>1){
+			season = (/s[0-9]{1,2}e/i).test(last_word) ? last_word.match(/[0-9]+(?=e)/)[0] : last_word.match(/[0-9]+(?=$)/)[0]
+			episode = (/s[0-9]{1,2}e[0-9]{1,2}/i).test(last_word) ? last_word.match(/[0-9]+(?=$)/)[0] : false;
+		} else {
+			season = episode = false
+		}
+	}
+
+	query = corrected_query || query;
+
 	//search_on_mdb
-	search_on_mdb (query, (function (query, results) {
+	search_on_mdb (query, (function (corrected_query, season, episode, query, results) {
 
 		if(!results || results.length==0)
 			no_result();
@@ -197,7 +223,10 @@ function search_for_show (query) {
 
 		//single result: complete info
 		if(only_one_good_show || exact_match ){
-			complete_output(only_one_good_show || exact_match, one_more_thing_to_do, try_to_output);
+			if(corrected_query)
+				browse(only_one_good_show || exact_match, season, episode, one_more_thing_to_do, try_to_output);
+			else
+				complete_output(only_one_good_show || exact_match, one_more_thing_to_do, try_to_output);
 		}
 
 		//multiple results: simple output
@@ -209,7 +238,7 @@ function search_for_show (query) {
 				}
 			}
 		}
-	}).bind(undefined, query))
+	}).bind(undefined, corrected_query, season, episode, query))
 }
 
 function no_result(){
@@ -276,12 +305,87 @@ function complete_oneline_output (result, callup, calldown) {
 	}).bind(undefined, calldown, item));
 }
 
+function browse (result, season, episode, callup, calldown) {
+	console.log("browse");
+	if(season) season = parseInt(season);
+	if(episode) episode = parseInt(episode);
+	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, season, episode, err, doc) {
+		if(doc){
+			browse2(doc, season, episode, callup, calldown)
+		} else {
+			detail_show(result, (function (season, episode, callup, calldown, doc) {
+				browse2(doc, season, episode, callup, calldown)
+			}).bind(undefined, season, episode, callup, calldown));
+		}
+	}).bind(undefined, callup, calldown, result, season, episode));
+}
+
+function browse2 (doc, season_number, episode_number, callup, calldown) {
+	season_number = parseInt(season_number)
+	episode_number = parseInt(episode_number)
+	if(episode_number){
+		get_specific_episode(doc, season_number, episode_number, (function (calldown, episode, show) {
+			if(episode.episode_number && episode.episode_number != 0){
+				var item = w.add(formatted_episode_number(episode.episode_number)+" — "+episode.name);
+				if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now())
+					item.subtitle = "Will air "+pretty_date(episode.air_date)
+				else if(episode.magnet && episode.magnet.piratebay)
+					item.subtitle = "Enter to stream right now and set this episode as your current progression";
+				else
+					item.subtitle = "cul & bite";
+			} else
+				no_result();
+				calldown();
+		}).bind(undefined, calldown));
+	} else if(season_number && season_number != 0){
+		get_episodes(doc, season_number, (function (calldown, season_number, show) {
+			if(show.season[""+season_number+""] && show.season[""+season_number+""].episode){
+				//TODO get magnet for entire season with thepiratebay search "show.name sXX*"
+				var keys = Object.keys(show.season[""+season_number+""].episode).sort(function (a, b) {
+					a=parseInt(a);
+					b=parseInt(b);
+					return (a>b?-1:a<b?1:0);
+				})
+				for (var i = 0, l = keys.length; i < l; i++) {
+					if(parseInt(keys[i])!=0){
+						var item = w.add(show.season[""+season_number+""].episode[""+keys[i]+""].episode_number+" - "+show.season[""+season_number+""].episode[""+keys[i]+""].name);
+						item.autocomplete = show.name + " s" + leading_zero(season_number) + "e" + leading_zero(show.season[""+season_number+""].episode[""+keys[i]+""].episode_number);
+						item.valid = "NO";
+					}
+				};
+				get_magnets_for_season(show, season_number, function () {});
+			} else
+				no_result();
+				calldown();
+		}).bind(undefined, calldown, season_number));
+	} else {
+		get_seasons(doc, (function (calldown, show) {
+			var keys = Object.keys(show.season).sort(function (a, b) {
+				a=parseInt(a);
+				b=parseInt(b);
+				return (a>b?-1:a<b?1:0);
+			})
+			for (var i = 0, l = keys.length; i < l; i++) {
+				if(parseInt(keys[i])!=0){
+					var std_name = "Season "+show.season[""+keys[i]+""].season_number;
+					var name = show.season[""+keys[i]+""].name || false;
+					var item = w.add(!name || simplify_str(name)==simplify_str(std_name) ? std_name : std_name+": "+name, i);
+					item.valid = "NO";
+					item.autocomplete = show.name + " s" + leading_zero(show.season[""+keys[i]+""].season_number);
+				}
+			};
+			calldown();
+		}).bind(undefined, calldown));
+	}
+}
+
 function complete_output (result, callup, calldown) {
 	console.log("complete_output");
 	//this might take some time notification
-	console.log("notif: "+(result.name?result.name:"New TV show")+" "+result.id)
+	console.log("notif: "+(result.name || "New TV show")+" "+result.id)
 	if(!exec) exec = require('child_process').exec;
-	exec("/usr/bin/terminal-notifier -title \""+(result.name?result.name:"New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":""), function(){});
+	exec("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, just a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":""), function(){});
 	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
 	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
 		if(doc){
@@ -393,16 +497,20 @@ function complete_output_2 (doc, callup, calldown){
 			var item = w.add("", 4)
 			if(doc.fav==true){
 				item.title = "Remove "+doc.name+" from my favorites";
-				item.arg = "f0"+doc.id;
+				item.arg = "f0"+doc.id+" "+doc.name;
 			}
 			else{
 				item.title = "Add "+doc.name+" to my favorites";
-				item.arg = "f1"+doc.id;
+				item.arg = "f1"+doc.id+" "+doc.name;
 			}
 			item.subtitle = "Favorited TV Shows appear on the main screen with nifty results :-)"
 			item.icon = "love.png";
 
 			//watch specific episode TODO
+			var item = w.add("Browse all episodes", 5)
+			item.subtitle = "Allows you to set where you're at in this show"
+			item.valid = "NO"
+			item.autocomplete = doc.name+" s"
 
 			callback();
 		}).bind(undefined, calldown));
@@ -509,7 +617,9 @@ function pretty_date (date) {
 			var next_week = new Date(Date.now());
 			next_week.setDate(next_week.getDate() + 7);
 			if(next_week.getTime()>next_air_date.getTime()){
-				next_ep_str = "on "+(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][next_air_date.getDay()]);
+				next_week.setDate(next_week.getDate() - 1);
+				next_ep_str = next_air_date.getDate()==next_week.getDate() ? "next" : "on";
+				next_ep_str += " "+(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][next_air_date.getDay()]);
 			} else {
 				if(now.getMonth()+1>=(next_air_date.getMonth())+12*(next_air_date.getFullYear()-now.getFullYear())){
 					var in_days = Math.floor((next_air_date.getTime()-now.getTime())/(1000*60*60*24));
@@ -658,13 +768,15 @@ function update_doc_with_seasonInfo(doc, res, season_number) {
     doc["season"]["" + season_number + ""]["air_date"] = res.air_date;
     if (!doc["season"]["" + season_number + ""]["episode"]) doc["season"]["" + season_number + ""]["episode"] = {};
     for (var i = 0, l = res.episodes.length; i < l; i++) {
-        if (!doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]) doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""] = {};
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["episode_number"] = res.episodes[i].episode_number;
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["season_number"] = season_number;
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["air_date"] = res.episodes[i].air_date;
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["name"] = res.episodes[i].name;
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["overview"] = res.episodes[i].overview;
-        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["still_path"] = res.episodes[i].still_path;
+    	if(res.episodes[i].episode_number!=0){
+	        if (!doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]) doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""] = {};
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["episode_number"] = res.episodes[i].episode_number;
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["season_number"] = season_number;
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["air_date"] = res.episodes[i].air_date;
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["name"] = res.episodes[i].name;
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["overview"] = res.episodes[i].overview;
+	        doc["season"]["" + season_number + ""]["episode"]["" + res.episodes[i].episode_number + ""]["still_path"] = res.episodes[i].still_path;
+	    }
     };
 
     // update database with new data for the show
@@ -674,12 +786,14 @@ function update_doc_with_seasonInfo(doc, res, season_number) {
     setModifier.$set["season."+season_number+".overview"] = res.overview;
     setModifier.$set["season."+season_number+".air_date"] = res.air_date;
     for (var i = 0, l = res.episodes.length; i < l; i++) {
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".episode_number"] = res.episodes[i].episode_number;
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".season_number"] = season_number;
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".air_date"] = res.episodes[i].air_date;
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".name"] = res.episodes[i].name;
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".overview"] = res.episodes[i].overview;
-    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".still_path"] = res.episodes[i].still_path;
+    	if(res.episodes[i].episode_number!=0){
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".episode_number"] = res.episodes[i].episode_number;
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".season_number"] = season_number;
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".air_date"] = res.episodes[i].air_date;
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".name"] = res.episodes[i].name;
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".overview"] = res.episodes[i].overview;
+	    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".still_path"] = res.episodes[i].still_path;
+	    }
     }
     db.shows.update({
         id: parseInt(doc.id)
@@ -743,10 +857,12 @@ function update_doc_with_tvInfo(doc, res) {
     doc["status"] = res.status;
     if (!doc["season"]) doc["season"] = {};
     for (var i = 0, l = res.seasons.length; i < l; i++) {
-        if (!doc["season"]["" + res.seasons[i].season_number + ""]) doc["season"]["" + res.seasons[i].season_number + ""] = {};
-        doc["season"]["" + res.seasons[i].season_number + ""]["season_number"] = res.seasons[i].season_number;
-        doc["season"]["" + res.seasons[i].season_number + ""]["poster_path"] = res.seasons[i].poster_path;
-        doc["season"]["" + res.seasons[i].season_number + ""]["air_date"] = res.seasons[i].air_date;
+    	if(res.seasons[i].season_number!=0){
+	        if (!doc["season"]["" + res.seasons[i].season_number + ""]) doc["season"]["" + res.seasons[i].season_number + ""] = {};
+	        doc["season"]["" + res.seasons[i].season_number + ""]["season_number"] = res.seasons[i].season_number;
+	        doc["season"]["" + res.seasons[i].season_number + ""]["poster_path"] = res.seasons[i].poster_path;
+	        doc["season"]["" + res.seasons[i].season_number + ""]["air_date"] = res.seasons[i].air_date;
+	    }
     };
 
     // update database with new data for the season
@@ -767,9 +883,11 @@ function update_doc_with_tvInfo(doc, res) {
     setModifier.$set["vote_average"] = res.vote_average;
     setModifier.$set["status"] = res.status;
     for (var i = 0, l = res.seasons.length; i < l; i++) {
-    	setModifier.$set["season."+res.seasons[i].season_number+".season_number"] = res.seasons[i].season_number;
-    	setModifier.$set["season."+res.seasons[i].season_number+".poster_path"] = res.seasons[i].poster_path;
-    	setModifier.$set["season."+res.seasons[i].season_number+".air_date"] = res.seasons[i].air_date;
+    	if(res.seasons[i].season_number!=0){
+	    	setModifier.$set["season."+res.seasons[i].season_number+".season_number"] = res.seasons[i].season_number;
+	    	setModifier.$set["season."+res.seasons[i].season_number+".poster_path"] = res.seasons[i].poster_path;
+	    	setModifier.$set["season."+res.seasons[i].season_number+".air_date"] = res.seasons[i].air_date;
+	    }
     }
     db.shows.update({
     	id: parseInt(doc.id)
@@ -814,7 +932,10 @@ function search_on_mdb (query, callback) {
 								popularity: res.results[i].popularity
 							} }, { upsert: true });
 						}
+						if(res.results[i].poster_path) delayed_images.push({"id": parseInt(res.results[i].id), "path": res.results[i].poster_path});
 					};
+
+
 
 				}).bind(undefined, callback, query)
 			);
@@ -844,6 +965,55 @@ function get_magnet (show, episode, callback) {
 
 		}).bind(undefined, show, episode, callback));
 	}
+}
+
+function get_magnets_for_season (show, season_number, callback) {
+	get_episodes(show, season_number, (function (callback, season_number, show) {
+		if(show.season && show.season[""+season_number+""] && show.season[""+season_number+""].episode){
+			var keys = Object.keys(show.season[""+season_number+""]["episode"]);
+			var has_em_all = true;
+			for (var i = 0, l = keys.length; i < l; i++) {
+				if(!show["season"][""+season_number+""]["episode"][keys[i]].magnet || show["season"][""+season_number+""]["episode"][keys[i]].magnet.piratebay==false){ // TODO check timestamp too
+					has_em_all = false;
+					break;
+				}
+			};
+			if(has_em_all) callback(show);
+			else {
+				search_piratebay(show.name+" S"+leading_zero(season_number)+"E*", (function (callback, show, season_number, results) {
+					//modify show
+					var updated_episodes = [];
+					var setModifier = { $set: {} };
+					for (var i = 0, l = results.length; i < l; i++) {
+						var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
+						if(match.length>0){
+							var numbers = match[0].match(/[0-9]{2}/g)
+							if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
+								var magnet = {
+									"timestamp": Date.now(),
+									"piratebay": results[i]
+								}
+								if(show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""]){
+									show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""].magnet = magnet;
+									setModifier.$set["season."+season_number+".episode."+parseInt(numbers[1])+".magnet"] = magnet;
+									updated_episodes.push(parseInt(numbers[1]));
+								}
+							}
+						}
+					};
+
+					callback(show)
+
+					//log in db
+					db.shows.update({
+						id: parseInt(show.id)
+					}, setModifier, { upsert: true }, function (){
+						console.log(" ... updated all magnets for "+(show.name?show.name:"")+" season "+season_number);
+					});
+				}).bind(undefined, callback, show, season_number));
+			}
+		} else callback(false);
+	}).bind(undefined, callback, season_number));
 }
 
 
@@ -1045,14 +1215,14 @@ function exit_server () {
 function post_processing () {
 	console.log("post processing");
 	// clean & optimize db
-	// db.shows.ensureIndex({ fieldName: 'id', unique: true }, function (err) {});
+	db.shows.ensureIndex({ fieldName: 'id', unique: true }, function (err) {});
 	db.queries_history.ensureIndex({ fieldName: 'query', unique: true }, function (err) {});
 	for (var i = db.length - 1; i >= 0; i--) {
 		db[i].persistence.compactDatafile;
 	};
 
 	// dl & crop images
-	if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
+	clearInterval(delayed_images_interval);
 	db.shows.find({}, function (err, docs) {
 		for (var i = docs.length - 1; i >= 0; i--) {
 			dl_image(imgs_folder+"/"+docs[i].id, docs[i].poster_path);
