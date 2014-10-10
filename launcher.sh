@@ -13,7 +13,7 @@ node="/usr/local/bin/node"
 # kickoff server if it isn't running
 if [[ ! -f ${NODE_PID} ]] || ( ! ps -p $(cat "${NODE_PID}") > /dev/null ); then
 	# launch server
-	nohup ${node} ./server.js 127.0.0.1:8374 &> node-out.txt &
+	nohup ${node} ./server.js 127.0.0.1:8374 &> "${cache}/node-out.txt" &
 	# and store NODE_PID
 	echo $! > "${NODE_PID}"
 fi
