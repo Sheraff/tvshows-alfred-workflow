@@ -124,6 +124,7 @@ function initialize () {
 		if(!mdb) mdb = require('moviedb')(mdb_API_key);
 		if(!request) request = require('request');
 		if(!exec) exec = require('child_process').exec;
+		if(!fs.existsSync(summaries_folder)) fs.mkdirSync(summaries_folder);
 	}, 2000);
 }
 

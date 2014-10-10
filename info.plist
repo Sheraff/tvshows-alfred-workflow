@@ -6,6 +6,17 @@
 	<string>florian.shows</string>
 	<key>connections</key>
 	<dict>
+		<key>4CBC3588-95E2-415E-9838-1E913FD51980</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>FBA63DBB-444B-46FE-9D20-370FFA23989A</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
+		</array>
 		<key>FBA63DBB-444B-46FE-9D20-370FFA23989A</key>
 		<array>
 			<dict>
@@ -110,6 +121,33 @@
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>action</key>
+				<integer>0</integer>
+				<key>argument</key>
+				<integer>0</integer>
+				<key>hotkey</key>
+				<integer>-1</integer>
+				<key>hotmod</key>
+				<integer>524288</integer>
+				<key>hotstring</key>
+				<string>double tap</string>
+				<key>leftcursor</key>
+				<false/>
+				<key>modsmode</key>
+				<integer>0</integer>
+				<key>relatedAppsMode</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.hotkey</string>
+			<key>uid</key>
+			<string>4CBC3588-95E2-415E-9838-1E913FD51980</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>type</key>
@@ -128,6 +166,11 @@
 	<key>uidata</key>
 	<dict>
 		<key>4A230223-7330-4A5A-AA51-3345AD645318</key>
+		<dict>
+			<key>ypos</key>
+			<real>130</real>
+		</dict>
+		<key>4CBC3588-95E2-415E-9838-1E913FD51980</key>
 		<dict>
 			<key>ypos</key>
 			<real>130</real>
