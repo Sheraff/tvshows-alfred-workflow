@@ -25,7 +25,9 @@ function start_server {
 
 # case "l" (originally) for large-type
 if [[ $case_letter == "l" ]] ; then
-	qlmanage -p "${cache}/summaries/$QUERY.rtf"
+	id=$(echo $QUERY| cut -d " " -f1)
+	name=${QUERY:${#id}}
+	(qlmanage -p "${cache}/summaries/$id.rtf"; osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name\"")
 
 # case "f" for favorite
 elif [[ $case_letter == "f" ]] ; then
