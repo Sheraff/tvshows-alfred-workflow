@@ -8,8 +8,9 @@ var weird_block1 = 0;
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * better ordering (the ones w/ an episode to watch on top)
  * calculate dates better (don't display "available soon" for something that will air in 24 hours)
- * better check of torrents ("how i met your mother s09e02" says not available but it is)
- * do something with old downloaded files
+ * better check of torrents ("how i met your mother s09e02" says not available but it is, "big band theory s08e05" says at the same time "out on tuesday" and "just got released, give it a few hours", on saturday)
+ * better info on homepage
+ * check seed nb before offering streaming (suggest DL instead)
  *
  */
 
@@ -46,13 +47,14 @@ var magnet_expiration = 2; //hours
 var show_expiration = 48;
 var season_expiration = 12;
 var search_expiration = 96; //4 days
+var keep_video_files_for = 6;
 
 // alfred
 var w = new alfred_xml("florian.shows");
 var node_pid = w.cache+"/node.pid";
 var imgs_folder = w.cache+"/imgs";
 var db_folder = w.cache+"/dbs";
-var episodes_folder = w.cache+"/episodes"
+var episodes_folder = w.cache+"/episodes";
 var summaries_folder = w.cache+"/summaries";
 
 // streaming
@@ -1301,7 +1303,87 @@ function post_processing () {
 			dl_image(imgs_folder+"/"+docs[i].id, docs[i].poster_path);
 		};
 	});
+
+	// remove old episode video files
+	dontLeave++;
+	fs.readdir(episodes_folder, function(err, files) {
+	    if (!err) {
+	        for (var i = files.length - 1; i >= 0; i--) {
+	        	dontLeave++;
+	            console.log(files[i])
+	            fs.stat(episodes_folder + "/" + files[i], (function(file, err, stats) {
+	            	var file_age = (Date.now() - new Date(stats.atime).getTime()) / (1000 * 60 * 60);
+	            	if (file_age>keep_video_files_for) {
+	            		console.log("deleting "+file);
+	            		fs.removeRecursive(file, function () {})
+	            	} else {
+	            		console.log("gonna keep "+file+" for now");
+	            	}
+	            	dontLeave--;
+	            }).bind(undefined, episodes_folder + "/" + files[i]));
+	        };
+	    }
+	    dontLeave--;
+	})
 }
+
+fs.removeRecursive = function(path, cb) {
+    var self = this;
+    fs.stat(path, function(err, stats) {
+        if (err) {
+            cb(err, stats);
+            return;
+        }
+        if (stats.isFile()) {
+            fs.unlink(path, function(err) {
+                if (err) {
+                    cb(err, null);
+                } else {
+                    cb(null, true);
+                }
+                return;
+            });
+        } else if (stats.isDirectory()) {
+            fs.readdir(path, function(err, files) {
+                if (err) {
+                    cb(err, null);
+                    return;
+                }
+                var f_length = files.length;
+                var f_delete_index = 0;
+                var checkStatus = function() {
+                    if (f_length === f_delete_index) {
+                        fs.rmdir(path, function(err) {
+                            if (err) {
+                                cb(err, null);
+                            } else {
+                                cb(null, true);
+                            }
+                        });
+                        return true;
+                    }
+                    return false;
+                };
+                if (!checkStatus()) {
+                    for (var i = 0; i < f_length; i++) {
+                        (function() {
+                            var filePath = path + '/' + files[i];
+                            fs.removeRecursive(filePath, function removeRecursiveCB(err, status) {
+                                if (!err) {
+                                    f_delete_index++;
+                                    checkStatus();
+                                } else {
+                                    cb(err, null);
+                                    return;
+                                }
+                            });
+                        })()
+                    }
+                }
+            });
+        }
+    });
+};
 
 function refresh_show(show, callback){
 	get_seasons(show, (function (callback, show) {
