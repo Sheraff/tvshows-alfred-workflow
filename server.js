@@ -7,19 +7,17 @@ var weird_block1 = 0;
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * better ordering (the ones w/ an episode to watch on top)
- * calculate dates better (don't display "available soon" for something that will air in 24 hours)
- * better check of torrents ("how i met your mother s09e02" says not available but it is, "big band theory s08e05" says at the same time "out on tuesday" and "just got released, give it a few hours", on saturday)
+ * calculate dates better (don't display "available soon" for something that will air in 24 hours, "big band theory s08e05" says at the same time "out on tuesday" and "just got released, give it a few hours", on saturday)
+ * better check of torrents ("how i met your mother s09e02" says not available but it is)
  * better info on homepage
  * check seed nb before offering streaming (suggest DL instead)
+ * ERR : VLC unable to open the MRL
  *
  */
 
 ///////////////
 // VARIABLES //
 ///////////////
-
-var DEBUG = false;
-var DEBUG_QUERY = "Attack on Titan";
 
 // essential modules
 var http = require('http');
@@ -37,7 +35,7 @@ var exec;
 
 // server
 var host = process.argv[2]?process.argv[2].split(':'):['127.0.0.1','8374'];
-var server_life = DEBUG?5000:60000;
+var server_life = 60000;
 var http_response;
 
 // user prefs
@@ -114,10 +112,6 @@ http.createServer(function (req, res) {
 	timeout = setTimeout(exit_server, server_life);
 }).listen(host[1], host[0]);
 initialize();
-if(DEBUG) {
-	finish_loading();
-	search_for_show(DEBUG_QUERY);
-}
 
 function initialize () {
 	//things to do right away
@@ -328,47 +322,59 @@ function browse (result, season, episode, callup, calldown) {
 	if(season) season = parseInt(season);
 	if(episode) episode = parseInt(episode);
 	if(!db.shows) db.shows = new Datastore({ filename: db_folder+"/shows.db", autoload: true });
+	callup();
 	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, season, episode, err, doc) {
 		if(doc){
 			browse2(doc, season, episode, callup, calldown)
 		} else {
+			callup();
 			detail_show(result, (function (season, episode, callup, calldown, doc) {
 				browse2(doc, season, episode, callup, calldown)
+				calldown();
 			}).bind(undefined, season, episode, callup, calldown));
 		}
+		calldown();
 	}).bind(undefined, callup, calldown, result, season, episode));
 }
 
 function browse2 (doc, season_number, episode_number, callup, calldown) {
 	season_number = parseInt(season_number)
 	episode_number = parseInt(episode_number)
+	callup();
 	if(episode_number){
 		get_specific_episode(doc, season_number, episode_number, (function (calldown, episode, show) {
 			if(episode.episode_number && episode.episode_number != 0){
-				var item = w.add(( episode.name && pretty_string(episode.name) ) ? episode.name : show.name+" "+formatted_episode_number(episode));
-				if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now())
-					item.subtitle = "Will air "+pretty_date(episode.air_date)
-				else if(episode.magnet && episode.magnet.piratebay){
-					if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100){
-						item.subtitle = "Resume watching at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )";
-						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )";
-					} else {
-						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )";
+				callup();
+				get_magnet(show, episode, (function (calldown, episode, show, magnet) {
+					if(magnet){
+						episode.magnet = magnet;
 					}
-					item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
-					item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
-				} else {
-					if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
-						item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
-					else if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100)
-						item.subtitle = "You watched "+percent_progress(episode)+"% of this episode, but it isn't available on piratebay anymore. Press Enter to mark as watched."
-					else
-						item.subtitle = "Not available on piratebay";
-					item.valid = "NO";
-				}
+					var item = w.add(( episode.name && pretty_string(episode.name) ) ? episode.name : show.name+" "+formatted_episode_number(episode));
+					if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now())
+						item.subtitle = "Will air "+pretty_date(episode.air_date)
+					else if(episode.magnet && episode.magnet.piratebay){
+						if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100){
+							item.subtitle = "Resume watching at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+							item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+						} else {
+							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+						}
+						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
+						item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
+					} else {
+						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
+							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
+						else if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100)
+							item.subtitle = "You watched "+percent_progress(episode)+"% of this episode, but it isn't available on piratebay anymore. Press Enter to mark as watched."
+						else
+							item.subtitle = "Not available on piratebay";
+						item.valid = "NO";
+					}
+					calldown();
+				}).bind(undefined, calldown, episode, show))
 			} else
 				no_result();
-				calldown();
+			calldown();
 		}).bind(undefined, calldown));
 	} else if(season_number && season_number != 0){
 		get_episodes(doc, season_number, (function (calldown, season_number, show) {
@@ -395,7 +401,7 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 				get_magnets_for_season(show, season_number, function () {});
 			} else
 				no_result();
-				calldown();
+			calldown();
 		}).bind(undefined, calldown, season_number));
 	} else {
 		get_seasons(doc, (function (calldown, show) {
@@ -451,8 +457,8 @@ function complete_output_2 (doc, callup, calldown){
 				if(episode.progress && episode.progress>30){
 					if(magnet.piratebay){
 						item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
-						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )";
-						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )";
+						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
 					}
 					else{
 						item.title = "You stopped at % of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
@@ -465,7 +471,7 @@ function complete_output_2 (doc, callup, calldown){
 					else
 						item.title = "Latest episode: "+item.title;
 					if(magnet.piratebay){
-						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )";
+						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
 					} else {
 						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
 							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
@@ -565,10 +571,7 @@ function try_to_output(){
 	if(countDownToEcho<=0){
 		countDownToEcho=0;
 		console.log("try_to_output: passed");
-		if(DEBUG)
-			console.log(w.echo());
-		else
-			http_response.end(w.echo());
+		http_response.end(w.echo());
 	}
 }
 
@@ -1579,24 +1582,26 @@ function finish_streaming (){
 
 function clean_watch_log_after (show_id, season_number, episode_number) {
 	db.shows.findOne({ id: parseInt(show_id) }, (function (season_number, episode_number, err, doc) {
-		var setModifier = { $unset: {} };
-		var season_keys = Object.keys(doc.season);
-		for (var i = 0, l = season_keys.length; i < l; i++) {
-			if(parseInt(season_keys[i])>=season_number){
-				if(doc.season[""+season_keys[i]+""].episode){
-					var episode_keys = Object.keys(doc.season[""+season_keys[i]+""].episode);
-					for (var j = 0, m = episode_keys.length; j < m; j++) {
-						if((parseInt(season_keys[i])==season_number && parseInt(episode_keys[j])>episode_number) || parseInt(season_keys[i])>season_number){
-							setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".duration"] = true;
-							setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".progress"] = true;
-						}
-					};
+		if(doc){
+			var setModifier = { $unset: {} };
+			var season_keys = Object.keys(doc.season);
+			for (var i = 0, l = season_keys.length; i < l; i++) {
+				if(parseInt(season_keys[i])>=season_number){
+					if(doc.season[""+season_keys[i]+""].episode){
+						var episode_keys = Object.keys(doc.season[""+season_keys[i]+""].episode);
+						for (var j = 0, m = episode_keys.length; j < m; j++) {
+							if((parseInt(season_keys[i])==season_number && parseInt(episode_keys[j])>episode_number) || parseInt(season_keys[i])>season_number){
+								setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".duration"] = true;
+								setModifier.$unset["season."+season_keys[i]+".episode."+episode_keys[j]+".progress"] = true;
+							}
+						};
+					}
 				}
 			}
+			db.shows.update({
+				id: parseInt(doc.id)
+			}, setModifier, {}, function(){});
 		}
-		db.shows.update({
-			id: parseInt(doc.id)
-		}, setModifier, {}, function(){});
 	}).bind(undefined, season_number, episode_number));
 }
 
