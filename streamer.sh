@@ -55,8 +55,8 @@ if [[ $case_letter == "m" ]] ; then
 	new_vlc_pid=$!
 	echo $new_vlc_pid > "${VLC_PID}"
 
-	id=$(echo $new_vlc_pid| awk '{print $1;}')
-	osascript -e "tell application \"System Events\"" -e "set proc to first process whose unix id is $id" -e "set the frontmost of proc to true" -e "end tell"
+	vlc_id=$(echo $new_vlc_pid| awk '{print $1;}')
+	osascript -e "tell application \"System Events\"" -e "set proc to first process whose unix id is $vlc_id" -e "set the frontmost of proc to true" -e "end tell"
 
 	# wait for server response (in case node isn't done launching yet)
 	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
