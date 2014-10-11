@@ -42,7 +42,7 @@ elif [[ $case_letter == "m" ]] ; then
 	# remove existing instances of peerflix & vlc (that we're responsible for)
 	if [[ -f ${PEERFLIX_PID} ]]; 	then kill -9 $(cat "${PEERFLIX_PID}"); fi
 	if [[ -f ${VLC_PID} ]]; 		then kill -9 $(cat "${VLC_PID}"); fi
-	while [[ -f ${VLC_PID} ]] && [[ -f ${VLC_PID} ]]; do :; done
+	while kill -0 $(cat "${PEERFLIX_PID}") || kill -0 $(cat "${VLC_PID}"); do :; done
 
 	echo "$case_letter$QUERY"
 
