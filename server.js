@@ -455,10 +455,10 @@ function complete_output_2 (doc, callup, calldown){
 			callup();
 			get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
 				if(episode.progress && episode.progress>30){
-					if(magnet.piratebay){
+					if(magnet && magnet.piratebay){
 						item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
-						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
-						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
+						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
 					}
 					else{
 						item.title = "You stopped at % of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
@@ -470,8 +470,8 @@ function complete_output_2 (doc, callup, calldown){
 						item.title = "Up next: "+item.title;
 					else
 						item.title = "Latest episode: "+item.title;
-					if(magnet.piratebay){
-						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+					if(magnet && magnet.piratebay){
+						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
 					} else {
 						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
 							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
