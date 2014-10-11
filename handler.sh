@@ -40,9 +40,17 @@ elif [[ $case_letter == "f" ]] ; then
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
 	# remove existing instances of peerflix & vlc (that we're responsible for)
-	if [[ -f ${PEERFLIX_PID} ]]; 	then kill -9 $(cat "${PEERFLIX_PID}"); fi
-	if [[ -f ${VLC_PID} ]]; 		then kill -9 $(cat "${VLC_PID}"); fi
-	while kill -0 $(cat "${PEERFLIX_PID}") || kill -0 $(cat "${VLC_PID}"); do :; done
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then kill -9 $(cat "${PEERFLIX_PID}"); fi
+	if [[ -f ${VLC_PID} ]] && kill -0 $(cat "${VLC_PID}"); then kill -9 $(cat "${VLC_PID}"); fi
+
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
+	fi
+	if [[ -f ${VLC_PID} ]] && kill -0 $(cat "${VLC_PID}"); then
+		while kill -0 $(cat "${VLC_PID}"); do :; done
+	fi
+	if [[ -f ${PEERFLIX_PID} ]]; then rm "${PEERFLIX_PID}"; fi
+	if [[ -f ${VLC_PID} ]]; then rm -f "${VLC}"; fi
 
 	echo "$case_letter$QUERY"
 

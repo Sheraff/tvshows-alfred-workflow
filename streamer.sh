@@ -25,7 +25,12 @@ function start_server {
 # case "m" for magnet
 if [[ $case_letter == "m" ]] ; then
 	# wait for peerflix and VLC to die
-	while [[ -f ${PEERFLIX_PID} ]] && [[ -f ${VLC_PID} ]]; do :; done
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+		while kill -0 $(cat "${PEERFLIX_PID}"); do echo prf-alive; done
+	fi
+	if [[ -f ${VLC_PID} ]] && kill -0 $(cat "${VLC_PID}"); then
+		while kill -0 $(cat "${VLC_PID}"); do echo vlc-alive; done
+	fi
 
 	# parsing input
 	id=$(echo $QUERY| cut -d " " -f1)
