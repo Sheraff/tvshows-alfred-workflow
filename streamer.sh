@@ -3,6 +3,7 @@ export PATH=$PATH:/usr/local/bin
 
 bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
+episodes="${cache}/episodes/"
 PEERFLIX_PID="${cache}/peerflix.pid"
 VLC_PID="${cache}/vlc.pid"
 NODE_PID="${cache}/node.pid"
@@ -44,7 +45,7 @@ if [[ $case_letter == "m" ]] ; then
 	start_server
 
 	# start peerflix (we should kill any previously running instance of peerflix here, based on PEERFLIX_PID)
-	peerflix "$magnet" -q -f /private/tmp/torrent-stream/ -h 127.0.0.1 -p 8375 &
+	peerflix "$magnet" -q -f "${episodes}" -h 127.0.0.1 -p 8375 &
 	echo $! > "${PEERFLIX_PID}"
 
 	# wait for video to be available and then start VLC with tcp connection

@@ -8,6 +8,8 @@ var weird_block1 = 0;
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * better ordering (the ones w/ an episode to watch on top)
  * calculate dates better (don't display "available soon" for something that will air in 24 hours)
+ * better check of torrents ("how i met your mother s09e02" says not available but it is)
+ * do something with old downloaded files
  *
  */
 
@@ -50,6 +52,7 @@ var w = new alfred_xml("florian.shows");
 var node_pid = w.cache+"/node.pid";
 var imgs_folder = w.cache+"/imgs";
 var db_folder = w.cache+"/dbs";
+var episodes_folder = w.cache+"/episodes"
 var summaries_folder = w.cache+"/summaries";
 
 // streaming
@@ -128,6 +131,7 @@ function initialize () {
 		if(!exec) exec = require('child_process').exec;
 		if(!fs.existsSync(summaries_folder)) fs.mkdirSync(summaries_folder);
 		if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
+		if(!fs.existsSync(episodes_folder)) fs.mkdirSync(episodes_folder);
 		delayed_images_interval = setInterval(function () {
 			for (var i = Math.min(5, delayed_images.length); i > 0; i--) {
 				var img = delayed_images.shift();
@@ -158,7 +162,19 @@ function homepage() {
 	one_more_thing_to_do();
 	db.shows.find({ fav: true }, function (err, docs) {
 		if(docs){
-			for (var i = 0, l = docs.length; i < l; i++) {
+			docs = docs.sort(function (a, b) {
+				if(!a.last_watched && !b.last_watched) return 0;
+				else if(a.last_watched && !b.last_watched) return 1;
+				else if(!a.last_watched && b.last_watched) return -1;
+				else if(!a.last_watched.timestamp && !b.last_watched.timestamp) return 0;
+				else if(a.last_watched.timestamp && !b.last_watched.timestamp) return 1;
+				else if(!a.last_watched.timestamp && b.last_watched.timestamp) return -1;
+				else if(a.last_watched.timestamp == b.last_watched.timestamp) return 0;
+				else if(a.last_watched.timestamp > b.last_watched.timestamp) return 1;
+				else if(a.last_watched.timestamp < b.last_watched.timestamp) return -1;
+				else return 0;
+			});
+			for (var i = docs.length - 1; i >= 0; i--) {
 				one_more_thing_to_do();
 				complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output);
 			};
@@ -1390,13 +1406,16 @@ function monitor_vlc (){
 					stream_summary[stream_summary.temp_request] = stream_summary.temp_result;
 					console.log("validated "+stream_summary.temp_request+" -> "+stream_summary.temp_result);
 				}
-			} else if( data_line == "> http://127.0.0.1:8375/" || data_line == "> " || data_line == ">" ){
+			} else if(data_line && (simplify_str(data_line) == simplify_str("> http://127.0.0.1:8375/")) && !stream_summary.duration){
 				console.log("title not there yet")
 				stream_summary.has_started = false;
 				stream_summary.step = false;
-			} else {
+			} else if(stream_summary.has_started){
 				console.log("no no no no no title changed");
 				finish_streaming();
+			} else {
+				stream_summary.has_started = false;
+				stream_summary.step = false;
 			}
 			stream_summary.temp_result = false;
 			stream_summary.temp_request = false;
@@ -1442,21 +1461,20 @@ function finish_streaming (){
 	console.log("finish");
 
 	//check that we have all the data we need and log it to db
-	if(stream_summary.showId && stream_summary.season && stream_summary.episode && stream_summary.duration && stream_summary.progress){
+	if(stream_summary.showId && stream_summary.season && stream_summary.episode){
 		var setModifier = { $set: {} };
-		if(stream_summary.season && stream_summary.episode){
-			setModifier.$set["last_watched.season"] = stream_summary.season;
-			setModifier.$set["last_watched.episode"] = stream_summary.episode;
-			clean_watch_log_after(stream_summary.showId, stream_summary.season, stream_summary.episode);
-		}
+
+		setModifier.$set["last_watched.timestamp"] = Date.now();
+		setModifier.$set["last_watched.season"] = stream_summary.season;
+		setModifier.$set["last_watched.episode"] = stream_summary.episode;
+		clean_watch_log_after(stream_summary.showId, stream_summary.season, stream_summary.episode);
+
 		if(stream_summary.progress && stream_summary.duration){
 			setModifier.$set["last_watched.progress"] = stream_summary.progress;
 			setModifier.$set["last_watched.duration"] = stream_summary.duration;
 			setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".duration"] = stream_summary.duration;
 			setModifier.$set["season."+stream_summary.season+".episode."+stream_summary.episode+".progress"] = stream_summary.progress;
 		}
-
-		// TODO if it a few episodes in a row are watched, add to favorites
 
 		db.shows.update({
 			id: parseInt(stream_summary.showId)
@@ -1470,9 +1488,9 @@ function finish_streaming (){
 				}
 			});
 		}).bind(undefined, stream_summary));
-
-
 	}
+
+	// TODO if it a few episodes in a row are watched, add to favorites
 
 	console.log('all done');
 }
