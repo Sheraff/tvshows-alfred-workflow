@@ -7,6 +7,7 @@ PEERFLIX_PID="${cache}/peerflix.pid"
 VLC_PID="${cache}/vlc.pid"
 NODE_PID="${cache}/node.pid"
 node="/usr/local/bin/node" # I believe this line is unnecessary as I export the PATH above already
+init=$(date +%s);
 
 QUERY="$1"
 case_letter=${QUERY:0:1}
@@ -34,7 +35,7 @@ elif [[ $case_letter == "f" ]] ; then
 	start_server
 	id=$(echo $QUERY| cut -d " " -f1)
 	name=${QUERY:${#id}}
-	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}"); do :; done
+	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
 # case "m" for magnet

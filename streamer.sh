@@ -8,6 +8,7 @@ PEERFLIX_PID="${cache}/peerflix.pid"
 VLC_PID="${cache}/vlc.pid"
 NODE_PID="${cache}/node.pid"
 node="/usr/local/bin/node" # I believe this line is unnecessary as I export the PATH above already
+init=$(date +%s);
 
 QUERY="$1"
 case_letter=${QUERY:0:1}
@@ -49,12 +50,12 @@ if [[ $case_letter == "m" ]] ; then
 	echo $! > "${PEERFLIX_PID}"
 
 	# wait for video to be available and then start VLC with tcp connection
-	until out=$(curl --head -f -s 127.0.0.1:8375); do :; done
+	until out=$(curl --head -f -s 127.0.0.1:8375) || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	/Applications/VLC.app/Contents/MacOS/VLC -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "$title" http://127.0.0.1:8375/ &
 	echo $! > "${VLC_PID}"
 
 	# wait for server response (in case node isn't done launching yet)
-	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id"); do :; done
+	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	echo " "
 
 fi
