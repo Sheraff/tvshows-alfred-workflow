@@ -6,7 +6,42 @@
 	<string>florian.shows</string>
 	<key>connections</key>
 	<dict>
+		<key>4A230223-7330-4A5A-AA51-3345AD645318</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>E7D5CE43-D996-4D2C-A607-22BDE3F0670A</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
+		</array>
 		<key>4CBC3588-95E2-415E-9838-1E913FD51980</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>FBA63DBB-444B-46FE-9D20-370FFA23989A</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
+		</array>
+		<key>53C2BB90-C486-4053-BA3A-952489970792</key>
+		<array/>
+		<key>B54E9934-471D-482F-9491-17A3D2E5BCB5</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>E7D5CE43-D996-4D2C-A607-22BDE3F0670A</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+			</dict>
+		</array>
+		<key>E84ADCEA-4BD1-4A5D-9D8B-A670D071D7D0</key>
 		<array>
 			<dict>
 				<key>destinationuid</key>
@@ -76,6 +111,50 @@
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>action</key>
+				<integer>0</integer>
+				<key>argument</key>
+				<integer>0</integer>
+				<key>hotkey</key>
+				<integer>-1</integer>
+				<key>hotmod</key>
+				<integer>524288</integer>
+				<key>hotstring</key>
+				<string>double tap</string>
+				<key>leftcursor</key>
+				<false/>
+				<key>modsmode</key>
+				<integer>0</integer>
+				<key>relatedAppsMode</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.hotkey</string>
+			<key>uid</key>
+			<string>4CBC3588-95E2-415E-9838-1E913FD51980</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>escaping</key>
+				<integer>100</integer>
+				<key>script</key>
+				<string>./streamer.sh "{query}"</string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.script</string>
+			<key>uid</key>
+			<string>E7D5CE43-D996-4D2C-A607-22BDE3F0670A</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
 				<key>escaping</key>
 				<integer>100</integer>
 				<key>script</key>
@@ -121,35 +200,23 @@
 		<dict>
 			<key>config</key>
 			<dict>
-				<key>action</key>
-				<integer>0</integer>
-				<key>argument</key>
-				<integer>0</integer>
-				<key>hotkey</key>
-				<integer>-1</integer>
-				<key>hotmod</key>
-				<integer>524288</integer>
-				<key>hotstring</key>
-				<string>double tap</string>
-				<key>leftcursor</key>
-				<false/>
-				<key>modsmode</key>
-				<integer>0</integer>
-				<key>relatedAppsMode</key>
-				<integer>0</integer>
+				<key>triggerid</key>
+				<string>query</string>
 			</dict>
 			<key>type</key>
-			<string>alfred.workflow.trigger.hotkey</string>
+			<string>alfred.workflow.trigger.external</string>
 			<key>uid</key>
-			<string>4CBC3588-95E2-415E-9838-1E913FD51980</string>
+			<string>E84ADCEA-4BD1-4A5D-9D8B-A670D071D7D0</string>
 			<key>version</key>
-			<integer>1</integer>
+			<integer>0</integer>
 		</dict>
 		<dict>
 			<key>config</key>
 			<dict>
 				<key>escaping</key>
-				<integer>127</integer>
+				<integer>100</integer>
+				<key>script</key>
+				<string>./alt_handler.sh "{query}"</string>
 				<key>type</key>
 				<integer>0</integer>
 			</dict>
@@ -173,7 +240,7 @@
 		<key>4CBC3588-95E2-415E-9838-1E913FD51980</key>
 		<dict>
 			<key>ypos</key>
-			<real>130</real>
+			<real>70</real>
 		</dict>
 		<key>53C2BB90-C486-4053-BA3A-952489970792</key>
 		<dict>
@@ -184,6 +251,16 @@
 		<dict>
 			<key>ypos</key>
 			<real>10</real>
+		</dict>
+		<key>E7D5CE43-D996-4D2C-A607-22BDE3F0670A</key>
+		<dict>
+			<key>ypos</key>
+			<real>130</real>
+		</dict>
+		<key>E84ADCEA-4BD1-4A5D-9D8B-A670D071D7D0</key>
+		<dict>
+			<key>ypos</key>
+			<real>200</real>
 		</dict>
 		<key>FBA63DBB-444B-46FE-9D20-370FFA23989A</key>
 		<dict>
