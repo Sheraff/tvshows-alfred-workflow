@@ -7,11 +7,10 @@ var weird_block1 = 0;
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * better ordering (the ones w/ an episode to watch on top)
- * calculate dates better (don't display "available soon" for something that will air in 24 hours, "big band theory s08e05" says at the same time "out on tuesday" and "just got released, give it a few hours", on saturday)
- * better check of torrents ("how i met your mother s09e02" says not available but it is)
  * better info on homepage
  * check seed nb before offering streaming (suggest DL instead)
  * ERR : VLC unable to open the MRL
+ * embed peerflix in the packages
  *
  */
 
@@ -255,7 +254,8 @@ function search_for_show (query) {
 }
 
 function no_result(){
-	w.add("No result.");
+	var item = w.add("No result.");
+	item.valid = "NO";
 	try_to_output();
 }
 
@@ -346,21 +346,22 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 			if(episode.episode_number && episode.episode_number != 0){
 				callup();
 				get_magnet(show, episode, (function (calldown, episode, show, magnet) {
-					if(magnet){
+					if(magnet.piratebay){
 						episode.magnet = magnet;
 					}
 					var item = w.add(( episode.name && pretty_string(episode.name) ) ? episode.name : show.name+" "+formatted_episode_number(episode));
 					if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now())
-						item.subtitle = "Will air "+pretty_date(episode.air_date)
+						item.subtitle = "Will air "+pretty_date(episode.air_date)+"."
 					else if(episode.magnet && episode.magnet.piratebay){
 						if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100){
 							item.subtitle = "Resume watching at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
 							item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+							item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
 						} else {
 							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
+							item.arg = "m"+show.id+" 0 "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
 						}
 						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
-						item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
 					} else {
 						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
 							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
@@ -473,7 +474,9 @@ function complete_output_2 (doc, callup, calldown){
 					if(magnet && magnet.piratebay){
 						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
 					} else {
-						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
+						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now())
+							item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
+						else if(episode.air_date && date_from_tmdb_format(episode.air_date) > (Date.now()-25*60*60*1000)) // TODO this case is true even when the episode is totally not out soon
 							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
 						else
 							item.subtitle = "Not available on piratebay";
@@ -619,9 +622,9 @@ function is_doc_in_docs (id, docs) {
 
 function st_nd_rd_th (nb) {
 	switch ((""+nb+"").slice(-1)){
-		case 1: return ""+nb+"st"; break
-		case 2: return ""+nb+"nd"; break
-		case 3: return ""+nb+"rd"; break
+		case "1": return ""+nb+"st"; break
+		case "2": return ""+nb+"nd"; break
+		case "3": return ""+nb+"rd"; break
 		default: return ""+nb+"th";
 	}
 }
@@ -696,7 +699,6 @@ function pretty_date (date) {
 ////////////////////////////////////////
 
 function find_latest(array) {
-	console.log("find_latest");
     var latest;
     var now = Date.now();
     for (var i = (array.isArray ? array.length : Object.keys(array).length) - 1; i >= 0; i--) {
@@ -788,7 +790,6 @@ function get_specific_season(show, season_number, callback) {
 
 function get_seasons(show, callback) {
     // should i go fetch new data for the show?
-    console.log(show.timestamp - (Date.now() - show_expiration*60*60*1000))
     if (!show.season || show.timestamp < (Date.now() - show_expiration*60*60*1000)) detail_show(show, callback)
     else callback(show);
 }
@@ -997,25 +998,32 @@ function search_on_mdb (query, callback) {
 
 function get_magnet (show, episode, callback) {
 	console.log("get_magnet");
-	if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000))
-		callback(episode.magnet);
-	else{
-		search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
-			var magnet = {
-				"timestamp": Date.now(),
-				"piratebay": (results.length>0?results[0]:false)
-			}
-			callback(magnet);
+	if(episode.air_date && date_from_tmdb_format(episode.air_date)<Date.now() || !episode.air_date){
+		if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000))
+			callback(episode.magnet);
+		else{
+			search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
+				var magnet = {
+					"timestamp": Date.now(),
+					"piratebay": (results.length>0?results[0]:false)
+				}
+				callback(magnet);
 
-			var setModifier = { $set: {} };
-			setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
-			db.shows.update({
-				id: parseInt(show.id)
-			}, setModifier, { upsert: true }, function (){
-				console.log(" ... new magnet "+(show.name?show.name:""));
-			});
+				var setModifier = { $set: {} };
+				setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
+				db.shows.update({
+					id: parseInt(show.id)
+				}, setModifier, { upsert: true }, function (){
+					console.log(" ... new magnet "+(show.name?show.name:""));
+				});
 
-		}).bind(undefined, show, episode, callback));
+			}).bind(undefined, show, episode, callback));
+		}
+	} else {
+		callback({
+			"timestamp": Date.now(),
+			"piratebay": false
+		});
 	}
 }
 
@@ -1088,7 +1096,7 @@ function search_piratebay (query, callback) {
 	console.log("------------------------- > internet connection (tpb)")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query+'/0/7/205',
+			url: 'http://thepiratebay.se/search/'+query+'/0/7/200',
 			gzip: 'true'
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
@@ -1313,14 +1321,11 @@ function post_processing () {
 	    if (!err) {
 	        for (var i = files.length - 1; i >= 0; i--) {
 	        	dontLeave++;
-	            console.log(files[i])
 	            fs.stat(episodes_folder + "/" + files[i], (function(file, err, stats) {
 	            	var file_age = (Date.now() - new Date(stats.atime).getTime()) / (1000 * 60 * 60);
 	            	if (file_age>keep_video_files_for) {
 	            		console.log("deleting "+file);
 	            		fs.removeRecursive(file, function () {})
-	            	} else {
-	            		console.log("gonna keep "+file+" for now");
 	            	}
 	            	dontLeave--;
 	            }).bind(undefined, episodes_folder + "/" + files[i]));
@@ -1411,6 +1416,7 @@ function dl_image (img_name, url) {
 					dontLeave--;
 				}, function (err) {
 					console.log(err);
+					dontLeave--;
 				});
 			}).bind(undefined, img_name));
 		} else {
@@ -1489,7 +1495,6 @@ function monitor_vlc (){
 			if(data_line == "> "+stream_summary.title){
 				if(stream_summary.temp_result && stream_summary.temp_request){
 					stream_summary[stream_summary.temp_request] = stream_summary.temp_result;
-					console.log("validated "+stream_summary.temp_request+" -> "+stream_summary.temp_result);
 				}
 			} else if(data_line && (simplify_str(data_line) == simplify_str("> http://127.0.0.1:8375/")) && !stream_summary.duration){
 				console.log("title not there yet")
@@ -1508,7 +1513,6 @@ function monitor_vlc (){
 			var number = full_data.match(/[0-9]+$/m);
 			if(number){
 				if(get_length){
-					console.log("duration: "+number[0]+"s ("+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+")");
 					stream_summary.temp_result = number[0];
 					stream_summary.temp_request = "duration"
 				}
