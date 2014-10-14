@@ -2,14 +2,13 @@ var weird_block1 = 0;
 /*
  * TODO:
  * read user prefs from file?
- * switch to `sips` for image croping: sips -c 60 60 imagename.jpg
  * better no-result case
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * check seed nb before offering streaming (suggest DL instead)
  * ERR : VLC unable to open the MRL (will be solved hopefuly by the next peerflix release)
  * embed peerflix in the packages
- * better torrent recog (scheme start with Name.With.Dots.Or.Spaces.SXXEXX)
+ * duration 0 case gives Infinity progress
  *
  */
 
@@ -27,7 +26,6 @@ var fs = require('fs');
 var mdb;
 var cheerio;
 var request;
-var easyimg;
 var Netcat;
 var exec;
 
@@ -1444,20 +1442,17 @@ function refresh_show(show, callback){
 }
 
 function dl_image (img_name, url) {
+	console.log("dl_image "+img_name);
 	dontLeave++;
 	fs.exists(img_name+".jpg", (function  (img_name, url, exists) {
 		if (!exists) {
-			if(!easyimg) easyimg = require('easyimage');
+			console.log("processing image "+img_name)
+			if(!exec) exec = require('child_process').exec;
 			request("https://image.tmdb.org/t/p/w60_or_h91"+url).pipe(fs.createWriteStream(img_name+"-nocrop.jpg")).on('close', (function (img_name) {
 				// crop all images to alfred format
-				easyimg.thumbnail({
-					src:img_name+"-nocrop.jpg", dst:img_name+".jpg",
-					width:60, height:60
-				}).then(function(image) {
-					fs.unlink(imgs_folder+"/"+image.name.replace(".jpg", "-nocrop.jpg"));
-					dontLeave--;
-				}, function (err) {
-					console.log(err);
+				img_name = img_name.replace(" ", "\\ ");
+				exec("(sips -c 60 60 "+img_name+"-nocrop.jpg;mv "+img_name+"-nocrop.jpg "+img_name+".jpg)", function(error, stdout, stderr){
+					console.log("error:"+error+"\nstdout:"+stdout+"\nstderr:"+stderr);
 					dontLeave--;
 				});
 			}).bind(undefined, img_name));
@@ -1592,6 +1587,14 @@ function finish_streaming (){
 	console.log("finish");
 
 	//check that we have all the data we need and log it to db
+	log_show_progress(stream_summary)
+
+	// TODO if it a few episodes in a row are watched, add to favorites
+
+	console.log('all done');
+}
+
+function log_show_progress (stream_summary) {
 	if(stream_summary.showId && stream_summary.season && stream_summary.episode){
 		var setModifier = { $set: {} };
 
@@ -1620,10 +1623,6 @@ function finish_streaming (){
 			});
 		}).bind(undefined, stream_summary));
 	}
-
-	// TODO if it a few episodes in a row are watched, add to favorites
-
-	console.log('all done');
 }
 
 function clean_watch_log_after (show_id, season_number, episode_number) {
