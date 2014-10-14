@@ -1085,7 +1085,7 @@ function get_magnets_for_season (show, season_number, callback) {
 						regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
 						var re = new RegExp(regexed_name+"[. ]?s[0-9]{2}e[0-9]{2}", "i");
 						var match = results[i].name.match(re);
-						if(match.length>0){
+						if(match && match.length>0){
 							var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
 							var numbers = match[0].match(/[0-9]{2}/g)
 							if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
