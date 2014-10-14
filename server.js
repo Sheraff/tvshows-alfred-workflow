@@ -6,11 +6,10 @@ var weird_block1 = 0;
  * better no-result case
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
- * better ordering (the ones w/ an episode to watch on top)
- * better info on homepage
  * check seed nb before offering streaming (suggest DL instead)
- * ERR : VLC unable to open the MRL
+ * ERR : VLC unable to open the MRL (will be solved hopefuly by the next peerflix release)
  * embed peerflix in the packages
+ * better torrent recog (scheme start with Name.With.Dots.Or.Spaces.SXXEXX)
  *
  */
 
@@ -45,6 +44,7 @@ var show_expiration = 48;
 var season_expiration = 12;
 var search_expiration = 96; //4 days
 var keep_video_files_for = 6;
+var video_quality = 200; // 200: all, 205: no HD, 208: only HD
 
 // alfred
 var w = new alfred_xml("florian.shows");
@@ -272,49 +272,60 @@ function simple_output(result, callback) {
 
 function complete_oneline_output (result, callup, calldown) {
 	console.log("complete_oneline_output");
-	//add result
-	var item = w.add(result.name, w.results.length+1);
-	item.subtitle = "♥ ";
-	item.autocomplete = result.name+" ";
-	item.valid = "NO";
-	item.uid = "result.name";
-	callup();
-	fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
-		item.icon = exists?name:"icon.png";
-		callback();
-	}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
 
 	//look for extra things to display
-	db.shows.findOne({ id: result.id }, (function (callback, item, err, doc) {
-		if(doc) find_ep_to_watch(doc, (function (callback, item, doc, episode) {
+		find_ep_to_watch(result, (function (callback, doc, episode) {
+			var subtitle = "";
+			var order_range = 0;
 			if(episode){
 				if(episode.progress){
-					item.subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 				} else if(doc.status && doc.status=="Ended") {
-					item.subtitle += "Ended";
+					subtitle += "Ended";
+					order_range = 400
 				} else if(doc.last_watched) {
-					item.subtitle += "Next up: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now()){
+						subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+						order_range = 100;
+					} else {
+						subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					}
 				} else {
-					item.subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					order_range = 200;
 				}
-				callback();
+				callback(order_range, subtitle);
 			} else {
-				find_next_release(doc, (function (callback, item, doc, episode) {
+				find_next_release(doc, (function (callback, doc, episode) {
 					if(episode){
 						var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
 						var date = episode.air_date?parse_date(episode.air_date):false;
-						if(date) item.subtitle += first+" episode"+date
+						order_range = 100;
+						if(date) subtitle += first+" episode"+date
 					} else if(doc.status && doc.status=="Ended") {
-						item.subtitle += "Ended";
+						subtitle += "Ended";
+						order_range = 400
 					} else {
-						item.subtitle += "Next episode's date not set yet";
+						subtitle += "Next episode's date not set yet";
+						order_range = 300;
 					}
-					callback();
-				}).bind(undefined, callback, item, doc));
+					callback(order_range, subtitle);
+				}).bind(undefined, callback, doc));
 			}
-		}).bind(undefined, callback, item, doc))
-		else callback();
-	}).bind(undefined, calldown, item));
+		}).bind(undefined, (function (callup, calldown, result, order_range, subtitle) {
+			//add result
+			var item = w.add(result.name, order_range+w.results.length+1);
+			item.subtitle = "♥ "+subtitle;
+			item.autocomplete = result.name+" ";
+			item.valid = "NO";
+			item.uid = "result.name";
+			callup();
+			fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
+				item.icon = exists?name:"icon.png";
+				callback();
+			}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
+			calldown();
+		}).bind(undefined, callup, calldown, result), result))
 }
 
 function browse (result, season, episode, callup, calldown) {
@@ -1003,9 +1014,23 @@ function get_magnet (show, episode, callback) {
 			callback(episode.magnet);
 		else{
 			search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
+
+				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
+				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+				var re = new RegExp(regexed_name+"[. ]?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
+
+				var found = false;
+				for (var i = 0, l = results.length; i < l; i++) {
+					var match = results[i].name.match(re);
+					if(match && match.length>0){
+						found = true;
+						break;
+					}
+				};
+
 				var magnet = {
 					"timestamp": Date.now(),
-					"piratebay": (results.length>0?results[0]:false)
+					"piratebay": (found?results[i]:false)
 				}
 				callback(magnet);
 
@@ -1056,8 +1081,12 @@ function get_magnets_for_season (show, season_number, callback) {
 					var updated_episodes = [];
 					var setModifier = { $set: {} };
 					for (var i = 0, l = results.length; i < l; i++) {
-						var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
+						var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
+						regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+						var re = new RegExp(regexed_name+"[. ]?s[0-9]{2}e[0-9]{2}", "i");
+						var match = results[i].name.match(re);
 						if(match.length>0){
+							var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
 							var numbers = match[0].match(/[0-9]{2}/g)
 							if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
 								var magnet = {
@@ -1096,7 +1125,7 @@ function search_piratebay (query, callback) {
 	console.log("------------------------- > internet connection (tpb)")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query+'/0/7/200',
+			url: 'http://thepiratebay.se/search/'+query.replace(/[^a-zA-Z0-9 ]/g, '')+'/0/7/'+video_quality,
 			gzip: 'true'
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
