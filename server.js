@@ -280,21 +280,34 @@ function complete_oneline_output (result, callup, calldown) {
 			if(episode){
 				if(episode.progress){
 					subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					callback(order_range, subtitle);
 				} else if(doc.status && doc.status=="Ended") {
 					subtitle += "Ended";
 					order_range = 400
+					callback(order_range, subtitle);
 				} else if(doc.last_watched) {
 					if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now()){
 						subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						order_range = 100;
+						callback(order_range, subtitle);
 					} else {
-						subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+						get_magnet(doc, episode, (function (callback, subtitle, episode, magnet) {
+							subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+							if(!magnet.piratebay){
+								if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000){
+									subtitle += " — This episode is airing today, wait a little for the torrent...";
+								} else {
+									subtitle += " — Torrent unavailable on piratebay.";
+								}
+							}
+							callback(0, subtitle);
+						}).bind(undefined, callback, subtitle, episode))
 					}
 				} else {
 					subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 					order_range = 200;
+					callback(order_range, subtitle);
 				}
-				callback(order_range, subtitle);
 			} else {
 				find_next_release(doc, (function (callback, doc, episode) {
 					if(episode){
@@ -375,7 +388,7 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
 					} else {
 						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
-							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
+							item.subtitle = "This episode is airing today, wait a little for the torrent...";
 						else if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100)
 							item.subtitle = "You watched "+percent_progress(episode)+"% of this episode, but it isn't available on piratebay anymore. Press Enter to mark as watched."
 						else
@@ -488,7 +501,7 @@ function complete_output_2 (doc, callup, calldown){
 						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now())
 							item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
 						else if(episode.air_date && date_from_tmdb_format(episode.air_date) > (Date.now()-25*60*60*1000)) // TODO this case is true even when the episode is totally not out soon
-							item.subtitle = "This episode just came out, give it a few hours and it'll be available...";
+							item.subtitle = "This episode is airing today, wait a little for the torrent...";
 						else
 							item.subtitle = "Not available on piratebay";
 						item.valid="NO";
@@ -1010,7 +1023,7 @@ function search_on_mdb (query, callback) {
 function get_magnet (show, episode, callback) {
 	console.log("get_magnet");
 	if(episode.air_date && date_from_tmdb_format(episode.air_date)<Date.now() || !episode.air_date){
-		if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000))
+		if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000) && !(episode.air_date && !episode.magnet.piratebay && date_from_tmdb_format(episode.air_date) > Date.now()-24*60*60*1000 && episode.magnet.timestamp < Date.now()-15*60*1000))
 			callback(episode.magnet);
 		else{
 			search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
