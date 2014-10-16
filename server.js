@@ -9,6 +9,9 @@ var weird_block1 = 0;
  * ERR : VLC unable to open the MRL (will be solved hopefuly by the next peerflix release)
  * embed peerflix in the packages
  * duration 0 case gives Infinity progress
+ * when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
+ * differentiate "actively following" from "rewatching an already out series" so that the homepage can display NEW EPISODE for the actively followed shows
+ * refresh next ep on percent_to_consider_watched reached
  *
  */
 
@@ -606,7 +609,7 @@ function try_to_output(){
 ///////////////////////
 
 function good_enough_show (show) {
-	return (show.name && show.first_air_date && show.first_air_date.split("-")[0]>1990 && show.popularity>0.008 && show.poster_path);
+	return (show.name && (!show.first_air_date || show.first_air_date.split("-")[0]>1985) && show.popularity>0.001 && show.poster_path);
 }
 
 function pretty_string (str) {
@@ -819,6 +822,7 @@ function get_seasons(show, callback) {
 function detail_show(doc, callback) {
 	console.log("detail_show ----------- > internet connection (mdb)");
     // fetch new data for the show
+    if(!mdb) mdb = require('moviedb')(mdb_API_key);
     mdb.tvInfo({
         id: doc.id
     }, (function(callback, doc, err, res) {
@@ -1442,7 +1446,6 @@ function refresh_show(show, callback){
 }
 
 function dl_image (img_name, url) {
-	console.log("dl_image "+img_name);
 	dontLeave++;
 	fs.exists(img_name+".jpg", (function  (img_name, url, exists) {
 		if (!exists) {
