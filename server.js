@@ -1140,7 +1140,7 @@ function search_piratebay (query, callback) {
 	console.log("------------------------- > internet connection (tpb)")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query.replace(/[^a-zA-Z0-9 ]/g, '')+'/0/7/'+video_quality,
+			url: 'http://thepiratebay.se/search/'+query.replace(/[^a-zA-Z0-9]*/g, ' ')+'/0/7/'+video_quality,
 			gzip: 'true'
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
