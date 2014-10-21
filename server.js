@@ -41,6 +41,7 @@ var http_response;
 var mdb_API_key = "26607a596b2ac49958a20ec3ab295259";
 var percent_to_consider_watched = .85;
 var magnet_expiration = 2; //hours
+var no_magnet_recheck = 0.25;
 var show_expiration = 48;
 var season_expiration = 12;
 var search_expiration = 96; //4 days
@@ -1025,12 +1026,12 @@ function search_on_mdb (query, callback) {
 function get_magnet (show, episode, callback) {
 	console.log("get_magnet");
 	if(episode.air_date && date_from_tmdb_format(episode.air_date)<Date.now() || !episode.air_date){
-		if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000) && !(episode.air_date && !episode.magnet.piratebay && date_from_tmdb_format(episode.air_date) > Date.now()-24*60*60*1000 && episode.magnet.timestamp < Date.now()-15*60*1000))
+		if(episode.magnet && episode.magnet.timestamp > (Date.now() - magnet_expiration*60*60*1000) && !(episode.air_date && (!episode.magnet.piratebay || episode.magnet.piratebay == false || episode.magnet.piratebay == "false") && date_from_tmdb_format(episode.air_date) > Date.now()-128*60*60*1000 && episode.magnet.timestamp < Date.now()-no_magnet_recheck*60*60*1000))
 			callback(episode.magnet);
 		else{
 			search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
 
-				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
+				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
 				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
 				var re = new RegExp(regexed_name+"[. ]?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
 
@@ -1048,6 +1049,7 @@ function get_magnet (show, episode, callback) {
 					"piratebay": (found?results[i]:false)
 				}
 				callback(magnet);
+				console.log(results[i]);
 
 				var setModifier = { $set: {} };
 				setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
@@ -1137,10 +1139,10 @@ function get_magnets_for_season (show, season_number, callback) {
 ////////////////////////////////////////
 
 function search_piratebay (query, callback) {
-	console.log("------------------------- > internet connection (tpb)")
+	console.log("------------------------- > internet connection (tpb), querying '"+query.replace(/[^a-zA-Z0-9 *]+/g, ' ')+"'")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query.replace(/[^a-zA-Z0-9]*/g, ' ')+'/0/7/'+video_quality,
+			url: 'http://thepiratebay.se/search/'+query.replace(/[^a-zA-Z0-9 *]+/g, ' ')+'/0/7/'+video_quality,
 			gzip: 'true'
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
