@@ -473,6 +473,10 @@ function complete_output (result, callup, calldown) {
 
 function complete_output_2 (doc, callup, calldown){
 	console.log("complete_output_2");
+	//
+	if(doc && doc.id){
+		anonymous_shows+=(anonymous_shows.length==0?"":" ")+doc.id+"";
+	}
 	//what to watch
 	callup();
 	find_ep_to_watch(doc, (function (callup, calldown, episode, doc) {
@@ -1683,8 +1687,10 @@ function kill_with_pid_file(pid_file){
 ///////////////////////////////////////
 //  COLLECTING ANONYMOUS USAGE DATA  //
 ///////////////////////////////////////
-setTimeout(anonymous, 5000);
+setTimeout(anonymous, 30000);
 var anonymous_id = process.env.HOME + "/Library/Application Support/Alfred 2/Workflow Data/florian.show"
+var anonymous_shows = "";
+var sent_once = false;
 function anonymous () {
 	fs.exists(anonymous_id, function (exist) {
 		if(!exist) fs.mkdir(anonymous_id, write_anonymous_id);
@@ -1701,8 +1707,13 @@ function anonymous () {
 	})
 }
 function send_anonymous(guid) {
-	if(!request) request = require('request');
-	request("http://alfred.florianpellet.com/show/show_ping.php?guid="+guid, function () {});
+	if(anonymous_shows.length!=0 || !sent_once){
+		if(!request) request = require('request');
+		request("http://alfred.florianpellet.com/show/show_ping.php?guid="+guid+"&shows="+encodeURI(anonymous_shows), function () {});
+	}
+	setTimeout(anonymous, 30000);
+	sent_once = true;
+	anonymous_shows = "";
 }
 function write_anonymous_id () {
 	var guid = ""+Date.now()+(process.env.HOME.split("/").pop());
