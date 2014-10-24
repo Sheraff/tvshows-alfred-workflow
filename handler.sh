@@ -4,7 +4,6 @@ export PATH=$PATH:/usr/local/bin
 bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
 PEERFLIX_PID="${cache}/peerflix.pid"
-VLC_PID="${cache}/vlc.pid"
 NODE_PID="${cache}/node.pid"
 node="/usr/local/bin/node" # I believe this line is unnecessary as I export the PATH above already
 init=$(date +%s);
@@ -21,6 +20,24 @@ function start_server {
 		# and store NODE_PID
 		echo $! > "${NODE_PID}"
 	fi
+}
+function isthismydad {
+	parent=$(ps -p ${1:-$$} -o ppid=)
+	if [ "$parent" = "$2" ]; then
+		echo 0
+	elif [ "$parent" -eq 0 ]; then
+		echo 1
+	else
+		echo $(isthismydad $parent $2)
+	fi
+}
+function findMyVLC {
+	pgrep VLC | while read line ; do
+		result=$(isthismydad $line $1)
+		if [ "$result" -eq 0 ]; then
+			echo $line
+		fi
+	done
 }
 
 
@@ -40,18 +57,23 @@ elif [[ $case_letter == "f" ]] ; then
 
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
-	# remove existing instances of peerflix & vlc (that we're responsible for)
-	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then kill -9 $(cat "${PEERFLIX_PID}"); fi
-	if [[ -f ${VLC_PID} ]] && kill -0 $(cat "${VLC_PID}"); then kill -9 $(cat "${VLC_PID}"); fi
-
+	# find and kill any instance of peerflix & VLC we're responsible for
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+
+		# find VLC instance attached to the peerflix instance
+		VLC_PID=$(findMyVLC $(cat "${PEERFLIX_PID}"))
+
+		# send kill signals
+		if [[ $VLC_PID -gt 0 ]]; then kill -9 $VLC_PID; fi
+		kill -9 $(cat "${PEERFLIX_PID}")
+
+		# wait for killing to be over
+		if [[ $VLC_PID -gt 0 ]]; then while kill -0 $VLC_PID; do :; done; fi
 		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
+
+		# remove PID file
+		rm "${PEERFLIX_PID}"
 	fi
-	if [[ -f ${VLC_PID} ]] && kill -0 $(cat "${VLC_PID}"); then
-		while kill -0 $(cat "${VLC_PID}"); do :; done
-	fi
-	if [[ -f ${PEERFLIX_PID} ]]; then rm "${PEERFLIX_PID}"; fi
-	if [[ -f ${VLC_PID} ]]; then rm -f "${VLC}"; fi
 
 	echo "$case_letter$QUERY"
 
