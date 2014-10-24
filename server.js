@@ -62,7 +62,7 @@ var vlc_pid = w.cache+"/vlc.pid";
 var is_streaming = false;
 var delay_before_post_process = 120000;
 var vlc_tcp = ['127.0.0.1','8376'];
-var post_process_while_streaming, vlc_monitoring;
+var post_process_while_streaming, player_monitoring;
 var stream_summary = {};
 
 // globals
@@ -95,7 +95,7 @@ http.createServer(function (req, res) {
 			var post = qs.parse(body);
 
 			if(post['stream'])
-				handle_stream(post['stream'], post['show_id']);
+				handle_stream(post['stream'], post['show_id'], post['player']);
 
 			else if(post['fav'])
 				toggle_fav(post['fav'], post['bool'], true);
@@ -1500,13 +1500,12 @@ function toggle_fav (id, bool, reply) {
 //  STREAMING LOGIC  //
 ///////////////////////
 
-function handle_stream (info, id){
+function handle_stream (info, id, player){
 	http_response.end('ok');
 	is_streaming = true;
 
 	// parse info
 	stream_summary = {};
-	stream_summary.is_open = false;
 	stream_summary.has_started = false;
 	stream_summary.title = info.split('\n')[0];
 	stream_summary.step = false;
@@ -1519,8 +1518,12 @@ function handle_stream (info, id){
 	stream_summary.monitorCounter = 0;
 	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
 
-	if(!Netcat) Netcat = require('node-netcat');
-	vlc_monitoring = setInterval(monitor_vlc, 1000);
+	// if(player=="mpv"){
+	// 	player_monitoring = setInterval(monitor_mpv, 1000);
+	// } else {
+		if(!Netcat) Netcat = require('node-netcat');
+		player_monitoring = setInterval(monitor_vlc, 1000);
+	// }
 }
 
 function monitor_vlc (){
@@ -1599,7 +1602,7 @@ function escapeRegExp(str) {
 
 function finish_streaming (){
 	stream_summary.has_started = false;
-	clearInterval(vlc_monitoring);
+	if(player_monitoring) clearInterval(player_monitoring);
 	is_streaming = false;
 
 	// kill sub processes and remove pid files

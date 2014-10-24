@@ -45,7 +45,7 @@ if [[ $case_letter == "m" ]] ; then
 	echo $! > "${PEERFLIX_PID}"
 
 	# wait for server response (in case node isn't done launching yet)
-	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id" -d "player=vlc") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	echo " "
 
 fi
