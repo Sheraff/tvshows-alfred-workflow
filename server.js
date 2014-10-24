@@ -6,12 +6,12 @@ var weird_block1 = 0;
  * use "season" torrents if nothing else available
  * handle cases where there is no internet / results from mdb or piratebay are unavailable
  * check seed nb before offering streaming (suggest DL instead)
- * ERR : VLC unable to open the MRL (will be solved hopefuly by the next peerflix release)
- * embed peerflix in the packages
  * duration 0 case gives Infinity progress
  * when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
  * differentiate "actively following" from "rewatching an already out series" so that the homepage can display NEW EPISODE for the actively followed shows
  * refresh next ep on percent_to_consider_watched reached
+ * ended show always appear at the end, even if I'm trying to rewatch it
+ * kill VLC before I kill peerflix
  *
  */
 
@@ -770,7 +770,7 @@ function find_next_release (show, callback) {
 	                            callback(show.season[season_number].episode[latest_ep.episode_number+1], show)
 	                        } else if(show.season[season_number+1]) {
 	                            get_episodes(show, season_number+1, (function(callback, season_number, show) {
-	                                if(show.season[season_number].episode[1]) callback(show.season[season_number].episode[1], show)
+	                                if(show.season[season_number].episode && show.season[season_number].episode[1]) callback(show.season[season_number].episode[1], show)
 	                                else callback(false, show);
 	                            }).bind(undefined, callback, season_number+1))
 	                        } else {
@@ -1506,6 +1506,7 @@ function handle_stream (info, id){
 
 	// parse info
 	stream_summary = {};
+	stream_summary.is_open = false;
 	stream_summary.has_started = false;
 	stream_summary.title = info.split('\n')[0];
 	stream_summary.step = false;
@@ -1539,7 +1540,7 @@ function monitor_vlc (){
 	});
 
 	client.on('error', function (err) {
-		if(err=="Error: connect ECONNREFUSED")
+		if(err=="Error: connect ECONNREFUSED" && stream_summary.has_started)
 			finish_streaming();
 		else
 			console.log("err: "+err);
@@ -1597,6 +1598,7 @@ function escapeRegExp(str) {
 }
 
 function finish_streaming (){
+	stream_summary.has_started = false;
 	clearInterval(vlc_monitoring);
 	is_streaming = false;
 
