@@ -10,9 +10,8 @@ var weird_block1 = 0;
  * when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
  * differentiate "actively following" from "rewatching an already out series" so that the homepage can display NEW EPISODE for the actively followed shows
  * refresh next ep on percent_to_consider_watched reached
- * ended show always appear at the end, even if I'm trying to rewatch it
  * kill VLC before I kill peerflix
- * strip exclamation point from all xml args
+ * strip exclamation point from all xml args ?
  *
  */
 
@@ -285,10 +284,6 @@ function complete_oneline_output (result, callup, calldown) {
 				if(episode.progress){
 					subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 					callback(order_range, subtitle);
-				} else if(doc.status && doc.status=="Ended") {
-					subtitle += "Ended";
-					order_range = 400
-					callback(order_range, subtitle);
 				} else if(doc.last_watched) {
 					if(episode.air_date && date_from_tmdb_format(episode.air_date)>Date.now()){
 						subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
@@ -307,6 +302,10 @@ function complete_oneline_output (result, callup, calldown) {
 							callback(0, subtitle);
 						}).bind(undefined, callback, subtitle, episode))
 					}
+				} else if(doc.status && doc.status=="Ended") {
+					subtitle += "Ended";
+					order_range = 400
+					callback(order_range, subtitle);
 				} else {
 					subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 					order_range = 200;
