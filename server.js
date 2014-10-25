@@ -12,6 +12,7 @@ var weird_block1 = 0;
  * refresh next ep on percent_to_consider_watched reached
  * ended show always appear at the end, even if I'm trying to rewatch it
  * kill VLC before I kill peerflix
+ * strip exclamation point from all xml args
  *
  */
 
@@ -31,6 +32,7 @@ var cheerio;
 var request;
 var Netcat;
 var exec;
+var socket;
 
 // server
 var host = process.argv[2]?process.argv[2].split(':'):['127.0.0.1','8374'];
@@ -708,9 +710,9 @@ function pretty_date (date) {
 				if(now.getMonth()+1>=(next_air_date.getMonth())+12*(next_air_date.getFullYear()-now.getFullYear())){
 					var in_days = Math.floor((next_air_date.getTime()-now.getTime())/(24*60*60*1000));
 					if(in_days%7==0)
-						next_ep_str = "in "+(in_days/7)+" weeks";
+						next_ep_str = "in "+(in_days/7)+" week"+((in_days/7)>1?"s":"");
 					else
-						next_ep_str = "in "+in_days+" days";
+						next_ep_str = "in "+in_days+" day"+(in_days>1?"s":"");
 				} else {
 					next_ep_str = "in "+(["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][next_air_date.getMonth()])
 					if((now.getFullYear()+1==next_air_date.getFullYear() && now.getMonth()<=next_air_date.getMonth()) || now.getFullYear()+1<next_air_date.getFullYear()){
@@ -1518,15 +1520,58 @@ function handle_stream (info, id, player){
 	stream_summary.monitorCounter = 0;
 	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
 
-	// if(player=="mpv"){
-	// 	player_monitoring = setInterval(monitor_mpv, 1000);
-	// } else {
-		if(!Netcat) Netcat = require('node-netcat');
+	if(player=="mpv"){
+		player_monitoring = setInterval(monitor_mpv, 1000);
+	} else {
 		player_monitoring = setInterval(monitor_vlc, 1000);
-	// }
+	}
+}
+
+function monitor_mpv (){
+	if(!socket) socket = require('net').Socket();
+
+	socket.on("connect", function() {
+		socket.write('{ "command": ["observe_property", 1, "time-pos"] }\n{ "command": ["observe_property", 2, "length"] }\n{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
+	});
+
+	socket.on("data", function(data) {
+		var data = data.toString('ascii').trim().split("\n");
+		for (var i = 0; i < data.length; i++) {
+			var msg = JSON.parse(data[i]);
+			if(msg.event){
+				switch(msg.event){
+					case 'property-change':
+							switch(msg.name){
+								case 'length':
+									stream_summary.duration = msg.data;
+									break;
+								case 'time-pos':
+									stream_summary.progress = msg.data;
+									break;
+								default:
+									break;
+							}
+						break;
+					case 'pause':
+						log_show_progress(stream_summary);
+						break;
+					default:
+						break;
+				}
+			}
+		};
+
+	});
+
+	socket.on("error", console.log);
+
+	socket.on('close', finish_streaming);
+
+	socket.connect("socket.io");
 }
 
 function monitor_vlc (){
+	if(!Netcat) Netcat = require('node-netcat');
 	var client = Netcat.client(vlc_tcp[1], vlc_tcp[0]);
 	var full_data = "";
 	var get_length = (stream_summary.progress && !stream_summary.duration);
