@@ -14,6 +14,17 @@ First and foremost, [download the workflow](https://github.com/Sheraff/tvshows-a
 
 This workflow makes use of [NodeJS](http://nodejs.org/), if you don’t know what it is, you probably don’t have it. If you don’t like to tinker with your computer, your journey ends here :-(
 
-It also uses [VLC](http://www.videolan.org/vlc/index.html) (just a media player to download) and optionally [terminal notifier](https://github.com/alloy/terminal-notifier) (`sudo gem install terminal-notifier`).
+This workflow also uses [VLC](http://www.videolan.org/vlc/index.html) for playback, if you don’t have it, it’s always good to get it anyway ;-)
 
-So if you have all that in the regular locations, it should work right out of the box.
+If you have these two things, it’ll work right out of the box!
+
+## extras
+
+If you want better video quality, and smoothest functioning of the whole workflow, I recommend the [MPV player](http://mpv.io/):
+`$ brew tap mpv-player/mpv`
+`$ brew install --HEAD mpv-player/mpv/libass-ct`
+`$ brew install mpv --HEAD`
+
+If you wish to receive notifications to keep you informed of what might be happening (it’s always reassuring to know that it’s just loading and hasn’t crashed), install [terminal notifier](https://github.com/alloy/terminal-notifier):
+`$ sudo gem install terminal-notifier`
+

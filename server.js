@@ -1530,11 +1530,12 @@ function handle_stream (info, id, player){
 function monitor_mpv (){
 	if(stream_summary.reopen == undefined) stream_summary.reopen = true;
 	if(stream_summary.can_log == undefined) stream_summary.can_log = true;
+	stream_summary.logged_end = false;
 
 	if(!socket){
 		socket = require('net').Socket();
 		socket.on("connect", function() {
-			socket.write('{ "command": ["observe_property", 1, "time-pos"] }\n{ "command": ["observe_property", 2, "length"] }\n{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
+			socket.write('{ "command": ["observe_property", 1, "time-pos"] }\n{ "command": ["observe_property", 2, "length"] }\n');
 		});
 
 		socket.on("data", function(data) {
@@ -1549,10 +1550,13 @@ function monitor_mpv (){
 								if(stream_summary.can_log) switch(msg.name){
 									case 'length':
 										stream_summary.duration = msg.data;
-										socket.write('{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
 										break;
 									case 'time-pos':
 										stream_summary.progress = msg.data;
+										if(stream_summary.can_log && !stream_summary.logged_end && stream_summary.duration && stream_summary.progress && stream_summary.progress/stream_summary.duration > percent_to_consider_watched){
+											log_show_progress(stream_summary)
+											stream_summary.logged_end = true;
+										}
 										break;
 									default:
 										break;
