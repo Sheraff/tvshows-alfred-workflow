@@ -32,7 +32,7 @@ function isthismydad {
 	fi
 }
 function findmyson {
-	if hash bite 2> /dev/null; then
+	if hash mpv 2> /dev/null; then
 		player="mpv"
 	else
 		player="VLC"

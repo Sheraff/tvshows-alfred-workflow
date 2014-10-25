@@ -1521,51 +1521,75 @@ function handle_stream (info, id, player){
 	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
 
 	if(player=="mpv"){
-		player_monitoring = setInterval(monitor_mpv, 1000);
+		monitor_mpv();
 	} else {
 		player_monitoring = setInterval(monitor_vlc, 1000);
 	}
 }
 
 function monitor_mpv (){
-	if(!socket) socket = require('net').Socket();
+	if(stream_summary.reopen == undefined) stream_summary.reopen = true;
+	if(stream_summary.can_log == undefined) stream_summary.can_log = true;
 
-	socket.on("connect", function() {
-		socket.write('{ "command": ["observe_property", 1, "time-pos"] }\n{ "command": ["observe_property", 2, "length"] }\n{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
-	});
+	if(!socket){
+		socket = require('net').Socket();
+		socket.on("connect", function() {
+			socket.write('{ "command": ["observe_property", 1, "time-pos"] }\n{ "command": ["observe_property", 2, "length"] }\n{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
+		});
 
-	socket.on("data", function(data) {
-		var data = data.toString('ascii').trim().split("\n");
-		for (var i = 0; i < data.length; i++) {
-			var msg = JSON.parse(data[i]);
-			if(msg.event){
-				switch(msg.event){
-					case 'property-change':
-							switch(msg.name){
-								case 'length':
-									stream_summary.duration = msg.data;
-									break;
-								case 'time-pos':
-									stream_summary.progress = msg.data;
-									break;
-								default:
-									break;
-							}
-						break;
-					case 'pause':
-						log_show_progress(stream_summary);
-						break;
-					default:
-						break;
+		socket.on("data", function(data) {
+			stream_summary.has_started = true;
+			stream_summary.reopen = false;
+			var data = data.toString('ascii').trim().split("\n");
+			for (var i = 0; i < data.length; i++) {
+				var msg = JSON.parse(data[i]);
+				if(msg.event){
+					switch(msg.event){
+						case 'property-change':
+								if(stream_summary.can_log) switch(msg.name){
+									case 'length':
+										stream_summary.duration = msg.data;
+										socket.write('{ "command": ["set_property_string", "media-title", "'+stream_summary.title+'"] }\n');
+										break;
+									case 'time-pos':
+										stream_summary.progress = msg.data;
+										break;
+									default:
+										break;
+								}
+							break;
+						case 'pause':
+							if(stream_summary.can_log) log_show_progress(stream_summary);
+							break;
+						case 'seek':
+							if(stream_summary.can_log) log_show_progress(stream_summary);
+							break;
+						case 'end-file':
+							stream_summary.can_log = false;
+							break;
+						default:
+							console.log(msg.event);
+							break;
+					}
 				}
+			};
+
+		});
+
+		socket.on("error", function (err) {
+			stream_summary.reopen = (!stream_summary.has_started && err.toString('ascii').trim() == "Error: connect ECONNREFUSED")
+		});
+
+		socket.on('close', function () {
+			if(stream_summary.reopen)
+				setTimeout(monitor_mpv, 1000);
+			else{
+				stream_summary.reopen = true;
+				delete stream_summary.can_log;
+				finish_streaming();
 			}
-		};
-
-	});
-
-	socket.on("error", console.log);
-
-	socket.on('close', finish_streaming);
+		});
+	}
 
 	socket.connect("socket.io");
 }

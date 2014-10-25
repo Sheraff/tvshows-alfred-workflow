@@ -41,8 +41,8 @@ if [[ $case_letter == "m" ]] ; then
 	start_server
 
 	# start peerflix
-	if hash bite 2> /dev/null; then
-		node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -k -- --start=$progress --input-unix-socket=socket.io &
+	if hash mpv 2> /dev/null; then
+		node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -k -- --start=$progress --input-unix-socket=socket.io --title="\"$title\"" &
 		player="mpv"
 	else
 		node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -v -- -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "\"$title\"" --play-and-exit &

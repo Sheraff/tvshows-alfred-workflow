@@ -18,8 +18,13 @@ function isthismydad {
 		echo $(isthismydad $parent $2)
 	fi
 }
-function findMyVLC {
-	pgrep VLC | while read line ; do
+function findmyson {
+	if hash mpv 2> /dev/null; then
+		player="mpv"
+	else
+		player="VLC"
+	fi
+	pgrep $player | while read line ; do
 		result=$(isthismydad $line $1)
 		if [ "$result" -eq 0 ]; then
 			echo $line
@@ -41,14 +46,14 @@ elif [[ $case_letter == "m" ]] ; then
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
 
 		# find VLC instance attached to the peerflix instance
-		VLC_PID=$(findMyVLC $(cat "${PEERFLIX_PID}"))
+		PLAYER_PID=$(findmyson $(cat "${PEERFLIX_PID}"))
 
 		# send kill signals
-		if [[ $VLC_PID -gt 0 ]]; then kill -9 $VLC_PID; fi
+		if [[ $PLAYER_PID -gt 0 ]]; then kill -9 $PLAYER_PID; fi
 		kill -9 $(cat "${PEERFLIX_PID}")
 
 		# wait for killing to be over
-		if [[ $VLC_PID -gt 0 ]]; then while kill -0 $VLC_PID; do :; done; fi
+		if [[ $PLAYER_PID -gt 0 ]]; then while kill -0 $PLAYER_PID; do :; done; fi
 		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
 
 		# remove PID file
