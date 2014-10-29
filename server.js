@@ -1,31 +1,3 @@
-var weird_block1 = 0;
-/*
- * TODO:
-
- *  -- TORRENT --
- * use "season" torrents if nothing else available
- * try and use the 1x01 notation for piratebay search as well
- * check seed nb before offering streaming (suggest DL instead)
- * send arguments without magnet link, call the server from handler.sh to get magnet link. THat allows for more time to find the best magnet
-
- *  -- STREAMING --
- * add "currently watching" case on homepage with order_range 0, with options to cancel streaming (if stream_summary.has_started == false), mark as watched, jump to next
- * kill player before I kill peerflix
- * duration 0 case gives Infinity progress
-
- *  -- INTERFACE --
- * read user prefs from file
- * differentiate "actively following" from "rewatching an already out series" so that the homepage can display NEW EPISODE for the actively followed shows
- * add "mark show as watched" on complete_output page as the last result. This result disappears when latest == last_watched.
- * better no-result case
-
- *  -- MISC --
- * handle cases where there is no internet / results from mdb or piratebay are unavailable
- * when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
- * strip exclamation point from all xml args ?
-
- */
-
 ///////////////
 // VARIABLES //
 ///////////////
@@ -187,9 +159,9 @@ function homepage() {
 				else if(a.last_watched.timestamp < b.last_watched.timestamp) return -1;
 				else return 0;
 			});
-			for (var i = docs.length - 1; i >= 0; i--) {
+			for (var l = docs.length, i = l - 1; i >= 0; i--) {
 				one_more_thing_to_do();
-				complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output);
+				complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i - 1);
 			};
 		}
 
@@ -288,75 +260,75 @@ function simple_output(result, callback) {
 		}).bind(undefined, callback, item, imgs_folder+"/"+result.id+".jpg"));
 }
 
-function complete_oneline_output (result, callup, calldown) {
+function complete_oneline_output (result, callup, calldown, order_index) {
 	console.log("complete_oneline_output");
 
 	//look for extra things to display
-		find_ep_to_watch(result, (function (callback, doc, episode) {
-			var subtitle = "";
-			var order_range = 100;
-			if(episode){
-				if(episode.progress){
-					subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-					callback(order_range, subtitle);
-				} else if(doc.last_watched) {
-					if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1){
-						subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-						order_range = 200;
-						callback(order_range, subtitle);
-					} else {
-						get_magnet(doc, episode, (function (callback, subtitle, episode, magnet) {
-							subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-							if(!magnet.piratebay){
-								if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000){
-									subtitle += " — This episode is airing today, wait a little for the torrent...";
-								} else {
-									subtitle += " — Torrent unavailable on piratebay.";
-								}
+	find_ep_to_watch(result, (function (callback, doc, order_index, episode) {
+		var subtitle = "";
+		var order_range = 100;
+		if(episode){
+			if(episode.progress){
+				subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+				callback(order_range+order_index, subtitle);
+			} else if(doc.last_watched) {
+				if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1){
+					subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+					order_range = 200;
+					callback(order_range+days_until(episode.air_date), subtitle);
+				} else {
+					get_magnet(doc, episode, (function (callback, subtitle, episode, order_index, magnet) {
+						subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+						if(!magnet.piratebay){
+							if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000){
+								subtitle += " — This episode is airing today, wait a little for the torrent...";
+							} else {
+								subtitle += " — Torrent unavailable on piratebay.";
 							}
-							callback(0, subtitle);
-						}).bind(undefined, callback, subtitle, episode))
-					}
+						}
+						callback(100 + order_index, subtitle);
+					}).bind(undefined, callback, subtitle, episode, order_index))
+				}
+			} else if(doc.status && doc.status=="Ended") {
+				subtitle += "Ended";
+				order_range = 1000
+				callback(order_range+order_index, subtitle);
+			} else {
+				subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+				order_range = 600;
+				callback(order_range+order_index, subtitle);
+			}
+		} else {
+			find_next_release(doc, (function (callback, doc, order_index, episode) {
+				if(episode){
+					var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
+					var date = episode.air_date?pretty_date(episode.air_date):false;
+					order_range = 200;
+					if(date) subtitle += first+" episode "+date
 				} else if(doc.status && doc.status=="Ended") {
 					subtitle += "Ended";
-					order_range = 500
-					callback(order_range, subtitle);
+					order_range = 1000
 				} else {
-					subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-					order_range = 300;
-					callback(order_range, subtitle);
+					subtitle += "Next episode's date not set yet";
+					order_range = 700;
 				}
-			} else {
-				find_next_release(doc, (function (callback, doc, episode) {
-					if(episode){
-						var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
-						var date = episode.air_date?pretty_date(episode.air_date):false;
-						order_range = 200;
-						if(date) subtitle += first+" episode "+date
-					} else if(doc.status && doc.status=="Ended") {
-						subtitle += "Ended";
-						order_range = 500
-					} else {
-						subtitle += "Next episode's date not set yet";
-						order_range = 400;
-					}
-					callback(order_range, subtitle);
-				}).bind(undefined, callback, doc));
-			}
-		}).bind(undefined, (function (callup, calldown, result, order_range, subtitle) {
-			//add result
-			var item = w.add(result.name, order_range+w.results.length+1);
-			item.subtitle = "♥ "+subtitle;
-			item.autocomplete = result.name+" ";
-			item.valid = "NO";
-			item.uid = "result.name";
-			callup();
-			fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
-				item.icon = exists?name:"icon.png";
-				callback();
-			}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
-			calldown();
-		}).bind(undefined, callup, calldown, result), result))
+				callback(order_range+order_index, subtitle);
+			}).bind(undefined, callback, doc, order_index));
+		}
+	}).bind(undefined, (function (callup, calldown, result, order_range, subtitle) {
+		//add result
+		var item = w.add(result.name, order_range);
+		item.subtitle = "♥ "+subtitle;
+		item.autocomplete = result.name+" ";
+		item.valid = "NO";
+		item.uid = "result.name";
+		callup();
+		fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
+			item.icon = exists?name:"icon.png";
+			callback();
+		}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
+		calldown();
+	}).bind(undefined, callup, calldown, result), result, order_index))
 }
 
 function browse (result, season, episode, callup, calldown) {
@@ -722,6 +694,13 @@ function make_preview_page (id, showName, genres, rating, status, year, text){
 		});
 	});
 
+}
+
+function days_until(date) {
+	if(!date) return false;
+	date = date_from_tmdb_format(date);
+	var days = (date - Date.now())/(1000*60*60*24);
+	return Math.floor(days)+(days<0?1:0);
 }
 
 function pretty_date (date) {
@@ -1895,16 +1874,3 @@ function write_anonymous_id () {
 	fs.writeFile(anonymous_id, guid);
 	send_anonymous(guid);
 }
-
-
-
-/* PASTEBIN & SNIPPETS
-
-the movie DB
-	image sizes: https://image.tmdb.org/t/p/{size}/iRDNn9EHKuBhGa77UBteazvsZa1.jpg
-		available: w60_or_h91, w92, w130, w185, w300, w396, w780, w1280, original
-
-# stream from VLC to HTML <video><source src="http://localhost:8081/test" type="video/ogg" /></video>
-/Applications/VLC.app/Contents/MacOS/VLC ~/Movies/New.Girl.S04E03.720p.HDTV.x264-KILLERS.mkv --sout '#transcode{vcodec=theo,vb=2000,scale=1,acodec=vorb,ab=128,channels=2,samplerate=44100}:http{mux=ogg,dst=:8081/test}'
-*/
-var weird_block2 = 0;
