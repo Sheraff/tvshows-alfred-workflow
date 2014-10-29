@@ -60,6 +60,27 @@ elif [[ $case_letter == "f" ]] ; then
 	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
+# case "c" for current
+elif [[ $case_letter == "c" ]] ; then
+	# find and kill any instance of peerflix & player we're responsible for
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+
+		# find VLC instance attached to the peerflix instance
+		PLAYER_PID=$(findmyson $(cat "${PEERFLIX_PID}"))
+
+		# send kill signals
+		if [[ $PLAYER_PID -gt 0 ]]; then kill -9 $PLAYER_PID; fi
+		kill -9 $(cat "${PEERFLIX_PID}")
+
+		# wait for killing to be over
+		if [[ $PLAYER_PID -gt 0 ]]; then while kill -0 $PLAYER_PID; do :; done; fi
+		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
+
+		# remove PID file
+		rm "${PEERFLIX_PID}"
+	fi
+
+
 # case "w" for watched
 elif [[ $case_letter == "w" ]] ; then
 	start_server

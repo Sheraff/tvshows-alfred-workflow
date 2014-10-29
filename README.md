@@ -38,7 +38,6 @@ If you wish to receive notifications to keep you informed of what might be happe
  - send arguments without magnet link, call the server from handler.sh to get magnet link. That allows for more time to find the best magnet.
 
 ### 2. STREAMING
- - add "currently watching" case on homepage with order_range 0, with options to cancel streaming (if stream_summary.has_started == false), mark as watched, jump to next
  - kill player before I kill peerflix
  - duration 0 case gives Infinity progress
 
