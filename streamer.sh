@@ -3,6 +3,7 @@ export PATH=$PATH:/usr/local/bin
 
 bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
+data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 episodes="${cache}/episodes/"
 PEERFLIX_PID="${cache}/peerflix.pid"
 NODE_PID="${cache}/node.pid"
@@ -24,9 +25,9 @@ function start_server {
 
 # case "m" for magnet
 if [[ $case_letter == "m" ]] ; then
-	# wait for peerflix and VLC to die
+	# wait for peerflix
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
-		while kill -0 $(cat "${PEERFLIX_PID}"); do echo prf-alive; done
+		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
 	fi
 
 	# parsing input
@@ -36,16 +37,16 @@ if [[ $case_letter == "m" ]] ; then
 	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
 
 	# send notification
-	terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${cache}/imgs/$id.jpg"
+	terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
 
 	start_server
 
 	# start peerflix
 	if hash mpv 2> /dev/null; then
-		node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -k -- --start=$progress --input-unix-socket=socket.io --title="\"$title\"" &
+		nohup node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -k -- --start=$progress --input-unix-socket=socket.io --title="\"$title\"" &
 		player="mpv"
 	else
-		node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -v -- -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "\"$title\"" --play-and-exit &
+		nohup node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" -v -- -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "\"$title\"" --play-and-exit &
 		player="VLC"
 	fi
 	echo $! > "${PEERFLIX_PID}"

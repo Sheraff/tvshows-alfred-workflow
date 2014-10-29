@@ -40,6 +40,10 @@ if [[ $case_letter == "l" ]] ; then
 elif [[ $case_letter == "f" ]] ; then
 	./handler.sh "f$QUERY"
 
+# case "w" for watched (default)
+elif [[ $case_letter == "w" ]] ; then
+	./handler.sh "w$QUERY"
+
 # case "m" for magnet (default with progress=0)
 elif [[ $case_letter == "m" ]] ; then
 	# find and kill any instance of peerflix & VLC we're responsible for

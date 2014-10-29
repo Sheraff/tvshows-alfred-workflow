@@ -3,9 +3,9 @@ export PATH=$PATH:/usr/local/bin
 
 bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
+data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 PEERFLIX_PID="${cache}/peerflix.pid"
 NODE_PID="${cache}/node.pid"
-node="/usr/local/bin/node" # I believe this line is unnecessary as I export the PATH above already
 init=$(date +%s);
 
 QUERY="$1"
@@ -16,7 +16,7 @@ function start_server {
 	# kickoff server if it isn't running
 	if [[ ! -f ${NODE_PID} ]] || ( ! ps -p $(cat "${NODE_PID}") > /dev/null ); then
 		# launch server
-		nohup ${node} ./server.js 127.0.0.1:8374 &> "${cache}/node-out.txt" &
+		nohup node ./server.js 127.0.0.1:8374 &> "${cache}/node-out.txt" &
 		# and store NODE_PID
 		echo $! > "${NODE_PID}"
 	fi
@@ -50,7 +50,7 @@ function findmyson {
 if [[ $case_letter == "l" ]] ; then
 	id=$(echo $QUERY| cut -d " " -f1)
 	name=${QUERY:${#id}}
-	(qlmanage -p "${cache}/summaries/$id.rtf"; osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \"")
+	(qlmanage -p "${data}/summaries/$id.rtf"; osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \"")
 
 # case "f" for favorite
 elif [[ $case_letter == "f" ]] ; then
@@ -60,9 +60,27 @@ elif [[ $case_letter == "f" ]] ; then
 	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
+# case "w" for watched
+elif [[ $case_letter == "w" ]] ; then
+	start_server
+	sub_case_letter=${QUERY:0:1}
+	QUERY=${QUERY:1}
+	id=$(echo $QUERY| cut -d " " -f1)
+	if [[ $sub_case_letter == "f" ]] ; then #case "f" for full
+		name=${QUERY:$[${#id}+1]}
+		until out=$(curl 127.0.0.1:8374 -s -d "mark_watched=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	elif [[ $sub_case_letter == "s" ]]; then #case "s" for specific
+		season=$(echo $QUERY| cut -d " " -f2)
+		episode=$(echo $QUERY| cut -d " " -f3)
+		name=${QUERY:$[${#id}+${#season}+${#episode}]+3}
+		until out=$(curl 127.0.0.1:8374 -s -d "mark_watched=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	fi
+	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
+
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
-	# find and kill any instance of peerflix & VLC we're responsible for
+	start_server
+	# find and kill any instance of peerflix & player we're responsible for
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
 
 		# find VLC instance attached to the peerflix instance

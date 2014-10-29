@@ -12,6 +12,10 @@ if [[ $case_letter == "l" ]] ; then
 elif [[ $case_letter == "f" ]] ; then
 	./handler.sh "f$QUERY"
 
+# case "w" for watched (default)
+elif [[ $case_letter == "w" ]] ; then
+	./handler.sh "w$QUERY"
+
 # case "m" for magnet (default with progress=0)
 elif [[ $case_letter == "m" ]] ; then
 
@@ -21,9 +25,9 @@ elif [[ $case_letter == "m" ]] ; then
 	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
 
 	bundle="florian.shows"
-	cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
+	data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 
 	open -g "$magnet"
-	terminal-notifier -title "Downloading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${cache}/imgs/$id.jpg"
+	terminal-notifier -title "Downloading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
 
 fi
