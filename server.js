@@ -144,6 +144,35 @@ function homepage() {
 	console.log("homepage");
 	//echo favs with ordering: output + simple info
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+
+	if(is_streaming){
+		one_more_thing_to_do();
+		db.shows.findOne({ id: parseInt(stream_summary.showId) }, function (err, doc) {
+			var episode = doc.season[""+stream_summary.season+""].episode[""+stream_summary.episode+""];
+			var item = w.add((stream_summary.logged_start?"Playing":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
+			if(stream_summary.logged_start)
+				item.subtitle = "Seen "+Math.round(100*stream_summary.progress/stream_summary.duration)+"%. Enter to stop streaming.";
+			else
+				item.subtitle = "Enter to abort streaming.";
+			item.subtitle += " ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
+			if(doc.fav) item.subtitle = "♥ "+item.subtitle;
+
+			one_more_thing_to_do();
+			get_magnet (doc, episode, (function (doc, item, magnet) {
+				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+(magnet.piratebay?magnet.piratebay.magnetLink:"false")+" "+doc.name;// cID s e magnet name
+				try_to_output();
+			}).bind(undefined, doc, item))
+
+			one_more_thing_to_do();
+			fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
+				item.icon = exists?name:"icon.png";
+				try_to_output();
+			}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
+
+			try_to_output();
+		})
+	}
+
 	one_more_thing_to_do();
 	db.shows.find({ fav: true }, function (err, docs) {
 		if(docs){
@@ -160,8 +189,10 @@ function homepage() {
 				else return 0;
 			});
 			for (var l = docs.length, i = l - 1; i >= 0; i--) {
-				one_more_thing_to_do();
-				complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i - 1);
+				if(!is_streaming || stream_summary.showId != docs[i].id){
+					one_more_thing_to_do();
+					complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i - 1);
+				}
 			};
 		}
 
@@ -261,12 +292,11 @@ function simple_output(result, callback) {
 }
 
 function complete_oneline_output (result, callup, calldown, order_index) {
-	console.log("complete_oneline_output");
 
 	//look for extra things to display
 	find_ep_to_watch(result, (function (callback, doc, order_index, episode) {
 		var subtitle = "";
-		var order_range = 100;
+		var order_range = 10;
 		if(episode){
 			if(episode.progress){
 				subtitle += Math.round(100*episode.progress/episode.duration)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
@@ -278,15 +308,18 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 					callback(order_range+days_until(episode.air_date), subtitle);
 				} else {
 					get_magnet(doc, episode, (function (callback, subtitle, episode, order_index, magnet) {
-						subtitle += "Up next: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+						var temp_sub = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(!magnet.piratebay){
-							if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000){
-								subtitle += " — This episode is airing today, wait a little for the torrent...";
+							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 25) == 1){
+								temp_sub = "Up soon: "+temp_sub+" — This episode is airing today, wait a little for the torrent...";
+								order_range = 100;
 							} else {
-								subtitle += " — Torrent unavailable on piratebay.";
+								temp_sub += " — Torrent unavailable on piratebay.";
 							}
-						}
-						callback(100 + order_index, subtitle);
+						} else
+							temp_sub = "Up next: "+temp_sub;
+						subtitle += temp_sub;
+						callback(order_range + order_index, subtitle);
 					}).bind(undefined, callback, subtitle, episode, order_index))
 				}
 			} else if(doc.status && doc.status=="Ended") {
@@ -460,7 +493,6 @@ function complete_output (result, callup, calldown) {
 }
 
 function complete_output_2 (doc, callup, calldown){
-	console.log("complete_output_2");
 	//
 	if(doc && doc.id){
 		anonymous_shows+=(anonymous_shows.length==0?"":" ")+doc.id+"";
@@ -754,7 +786,7 @@ function find_latest(array) {
     for (var i = (array.isArray ? array.length : Object.keys(array).length) - 1; i >= 0; i--) {
         var index = array.isArray ? i : Object.keys(array)[i]
         //avoid season/episode 0 (usually "specials") being the main thing
-        if (array[index].season_number == 0 || array[index].episode_number == 0) continue;
+        if (array[index].season_number == 0 || array[index].season_number == undefined || array[index].season_number == "undefined" || array[index].episode_number == 0 || array[index].episode_number == undefined || array[index].episode_number == "undefined") continue;
         //initialize with any
         if (!latest) {
             if (array[index].air_date && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
@@ -772,7 +804,6 @@ function date_from_tmdb_format(tmdb_date) {
 }
 
 function find_next_release (show, callback) {
-	console.log("find_next_release");
 	if(show.status == "Ended"){
 		callback(false, show)
 	} else {
@@ -821,12 +852,11 @@ function find_latest_episode_of_show(show, callback){
 }
 
 function find_ep_to_watch(show, callback) {
-	console.log("find_ep_to_watch");
     if (show.last_watched) {
         if (show.last_watched.progress && show.last_watched.duration && show.last_watched.progress / show.last_watched.duration < percent_to_consider_watched) get_specific_episode(show, show.last_watched.season, show.last_watched.episode, callback)
-        else get_specific_episode(show, show.last_watched.season, show.last_watched.episode + 1, (function(callback, episode, show) {
+        else get_specific_episode(show, show.last_watched.season, parseInt(show.last_watched.episode) + 1, (function(callback, episode, show) {
             if (episode) callback(episode, show)
-            else get_specific_episode(show, show.last_watched.season + 1, 1, callback)
+            else get_specific_episode(show, parseInt(show.last_watched.season) + 1, 1, callback)
         }).bind(undefined, callback))
     } else {
         find_latest_episode_of_show(show, callback);
@@ -834,12 +864,13 @@ function find_ep_to_watch(show, callback) {
 }
 
 function get_specific_season(show, season_number, callback) {
-	console.log("get_specific_season");
-    // everything taken care of for getting this season
-    get_seasons(show, (function(callback, season_number, show) {
-        if (show.season && show.season[season_number]) callback(show.season[season_number], show)
-        else callback(false)
-    }).bind(undefined, callback, season_number))
+	if(season_number){
+	    // everything taken care of for getting this season
+	    get_seasons(show, (function(callback, season_number, show) {
+	        if (show.season && show.season[season_number]) callback(show.season[season_number], show)
+	        else callback(false)
+	    }).bind(undefined, callback, season_number))
+	} else callback(false)
 }
 
 function get_seasons(show, callback) {
@@ -862,9 +893,8 @@ function detail_show(doc, callback) {
 }
 
 function update_doc_with_seasonInfo(doc, res, season_number) {
-	console.log("update_doc_with_seasonInfo");
 
-	if(res){
+	if(res && season_number){
 
 	    // updates doc with new data for the show
 	    doc["season"]["" + season_number + ""]["timestamp"] = Date.now();
@@ -891,7 +921,7 @@ function update_doc_with_seasonInfo(doc, res, season_number) {
 	    setModifier.$set["season."+season_number+".overview"] = res.overview;
 	    setModifier.$set["season."+season_number+".air_date"] = res.air_date;
 	    for (var i = 0, l = res.episodes.length; i < l; i++) {
-	    	if(res.episodes[i].episode_number!=0){
+	    	if(res.episodes[i].episode_number && res.episodes[i].episode_number!=0){
 		    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".episode_number"] = res.episodes[i].episode_number;
 		    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".season_number"] = season_number;
 		    	setModifier.$set["season."+season_number+".episode."+res.episodes[i].episode_number+".air_date"] = res.episodes[i].air_date;
@@ -905,27 +935,41 @@ function update_doc_with_seasonInfo(doc, res, season_number) {
 	    }, setModifier, {}, (function (){
 	        console.log(" ... updated "+(doc.name?doc.name+" ":"")+"with tvSeasonInfo for season "+season_number);
 	    }).bind(undefined, season_number));
+	} else if(season_number) {
+
+		// update timestamp only
+		var setModifier = { $set: {} };
+		setModifier.$set["season."+season_number+".timestamp"] = Date.now();
+		db.shows.update({
+		    id: parseInt(doc.id)
+		}, setModifier, {}, (function (){
+		    console.log(" ... updated "+(doc.name?doc.name+" ":"")+"with empty tvSeasonInfo for season "+season_number);
+		}).bind(undefined, season_number));
 	}
+
 	return doc;
 }
 
 function get_specific_episode(show, season_number, episode_number, callback) {
-	console.log("get_specific_episode");
-    // everything taken care of for getting this season
-    get_seasons(show, (function(callback, season_number, episode_number, show) {
-        get_episodes(show, season_number, (function(callback, season_number, episode_number, show) {
-            if (show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
-            else callback(false, show)
-        }).bind(undefined, callback, season_number, episode_number))
-    }).bind(undefined, callback, season_number, episode_number))
+	if(season_number && episode_number){
+	    // everything taken care of for getting this season
+	    get_seasons(show, (function(callback, season_number, episode_number, show) {
+	        get_episodes(show, season_number, (function(callback, season_number, episode_number, show) {
+	            if (show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
+	            else callback(false, show)
+	        }).bind(undefined, callback, season_number, episode_number))
+	    }).bind(undefined, callback, season_number, episode_number))
+	} else callback(false, show)
 }
 
 function get_episodes(show, season_number, callback) {
-    // should i go fetch new data for the season
-    get_seasons(show, (function(callback, season_number, show) {
-        if (show.season && show.season[season_number] && (!show.season[season_number].episode || check_time_with(show.season[season_number].timestamp, season_expiration) == -1 )) detail_season(season_number, show, callback)
-        else callback(show);
-    }).bind(undefined, callback, season_number))
+	if(season_number){
+	    // should i go fetch new data for the season
+	    get_seasons(show, (function(callback, season_number, show) {
+	        if (show.season && show.season[season_number] && (!show.season[season_number].timestamp || check_time_with(show.season[season_number].timestamp, season_expiration) == -1 )) detail_season(season_number, show, callback)
+	        else callback(show);
+	    }).bind(undefined, callback, season_number))
+	} else callback(show);
 }
 
 function detail_season(season_number, doc, callback) {
@@ -936,13 +980,12 @@ function detail_season(season_number, doc, callback) {
         id: doc.id,
         season_number: season_number
     }, (function(callback, season_number, doc, err, res) {
-        if(res) doc = update_doc_with_seasonInfo(doc, res, season_number)
+        doc = update_doc_with_seasonInfo(doc, res, season_number)
         callback(doc);
     }).bind(undefined, callback, season_number, doc))
 }
 
 function update_doc_with_tvInfo(doc, res) {
-	console.log("update_doc_with_tvInfo");
     // updates the doc with new data for the season
     if(res){
 	    if (!doc) doc = {};
@@ -989,7 +1032,7 @@ function update_doc_with_tvInfo(doc, res) {
 	    setModifier.$set["vote_average"] = res.vote_average;
 	    setModifier.$set["status"] = res.status;
 	    for (var i = 0, l = res.seasons.length; i < l; i++) {
-	    	if(res.seasons[i].season_number!=0){
+	    	if(res.seasons[i].season_number && res.seasons[i].season_number!=0){
 		    	setModifier.$set["season."+res.seasons[i].season_number+".season_number"] = res.seasons[i].season_number;
 		    	setModifier.$set["season."+res.seasons[i].season_number+".poster_path"] = res.seasons[i].poster_path;
 		    	setModifier.$set["season."+res.seasons[i].season_number+".air_date"] = res.seasons[i].air_date;
@@ -1000,12 +1043,22 @@ function update_doc_with_tvInfo(doc, res) {
 	    }, setModifier, { upsert: true }, function (){
 	    	console.log(" ... updated "+(doc.name?doc.name:"")+" with tv_info");
 	    });
+	} else {
+
+		// update timestamp only
+		var setModifier = { $set: {} };
+		setModifier.$set["timestamp"] = Date.now();
+		db.shows.update({
+			id: parseInt(doc.id)
+		}, setModifier, {}, function (){
+			console.log(" ... updated "+(doc.name?doc.name:"")+" with empty tv_info");
+		});
 	}
+
     return doc;
 }
 
 function search_on_mdb (query, callback) {
-	console.log("search_on_mdb")
 	if(!db.queries_history) db.queries_history = new Datastore({ filename: w.cache+"/queries_history.db", autoload: true });
 	db.queries_history.findOne({ query: query.trim() }, (function (callback, query, err, doc) {
 		if(doc && check_time_with(doc.timestamp, search_expiration) == 1 ){
@@ -1052,8 +1105,7 @@ function search_on_mdb (query, callback) {
 }
 
 function get_magnet (show, episode, callback) {
-	console.log("get_magnet");
-	if((episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == -1) || !episode.air_date){
+	if(show && episode && ((episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == -1) || !episode.air_date)){
 		if(episode.magnet && check_time_with(episode.magnet.timestamp, magnet_expiration) == 1 && !(episode.air_date && (!episode.magnet.piratebay || episode.magnet.piratebay == false || episode.magnet.piratebay == "false") && check_time_with(date_from_tmdb_format(episode.air_date), 128) == 1 && check_time_with(episode.magnet.timestamp, no_magnet_recheck) == -1))
 			callback(episode.magnet);
 		else{
@@ -1077,15 +1129,16 @@ function get_magnet (show, episode, callback) {
 					"piratebay": (found?results[i]:false)
 				}
 				callback(magnet);
-				console.log(results[i]);
 
-				var setModifier = { $set: {} };
-				setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
-				db.shows.update({
-					id: parseInt(show.id)
-				}, setModifier, { upsert: true }, function (){
-					console.log(" ... new magnet "+(show.name?show.name:""));
-				});
+				if(episode.season_number && episode.episode_number){
+					var setModifier = { $set: {} };
+					setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
+					db.shows.update({
+						id: parseInt(show.id)
+					}, setModifier, { upsert: true }, function (){
+						console.log(" ... new magnet "+(show.name?show.name:""));
+					});
+				}
 
 			}).bind(undefined, show, episode, callback));
 		}
@@ -1098,67 +1151,70 @@ function get_magnet (show, episode, callback) {
 }
 
 function get_magnets_for_season (show, season_number, callback) {
-	get_episodes(show, season_number, (function (callback, season_number, show) {
-		if(show.season && show.season[""+season_number+""] && show.season[""+season_number+""].episode){
-			var keys = Object.keys(show.season[""+season_number+""]["episode"]);
-			var has_em_all = true;
-			var lonely_episode = false;
-			for (var i = 0, l = keys.length; i < l; i++) {
-				if(!show["season"][""+season_number+""]["episode"][keys[i]].magnet || show["season"][""+season_number+""]["episode"][keys[i]].magnet.piratebay==false || check_time_with(show["season"][""+season_number+""]["episode"][keys[i]].magnet.timestamp, magnet_expiration) == -1 ){
-					has_em_all = false;
-					if(lonely_episode){
-						lonely_episode = false;
-						break;
-					} else {
-						lonely_episode = show["season"][""+season_number+""]["episode"][keys[i]];
+	if(season_number){
+		get_episodes(show, season_number, (function (callback, season_number, show) {
+			if(show.season && show.season[""+season_number+""] && show.season[""+season_number+""].episode){
+				var keys = Object.keys(show.season[""+season_number+""]["episode"]);
+				var has_em_all = true;
+				var lonely_episode = false;
+				for (var i = 0, l = keys.length; i < l; i++) {
+					var temp_episode = show["season"][""+season_number+""]["episode"][keys[i]];
+					if((temp_episode.air_date && check_time_with(temp_episode.air_date, 0) == -1 ) && (!temp_episode.magnet || temp_episode.magnet.piratebay==false || check_time_with(temp_episode.magnet.timestamp, magnet_expiration) == -1 )){
+						has_em_all = false;
+						if(lonely_episode){
+							lonely_episode = false;
+							break;
+						} else {
+							lonely_episode = temp_episode;
+						}
 					}
-				}
-			};
-			if(has_em_all) callback(show);
-			else if(lonely_episode){
-				get_magnet(show, lonely_episode, (function (callback, show, episode, magnet) {
-					show["season"][""+episode.season_number+""]["episode"][""+episode.episode_number+""].magnet = magnet;
-					callback(show);
-				}).bind(undefined, callback, show, lonely_episode))
-			} else {
-				search_piratebay(show.name+" S"+leading_zero(season_number)+"E*", (function (callback, show, season_number, results) {
-					//modify show
-					var updated_episodes = [];
-					var setModifier = { $set: {} };
-					for (var i = 0, l = results.length; i < l; i++) {
-						var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
-						regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-						var re = new RegExp(regexed_name+"[. ]?s[0-9]{2}e[0-9]{2}", "i");
-						var match = results[i].name.match(re);
-						if(match && match.length>0){
-							var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
-							var numbers = match[0].match(/[0-9]{2}/g)
-							if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
-								var magnet = {
-									"timestamp": Date.now(),
-									"piratebay": results[i]
-								}
-								if(show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""]){
-									show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""].magnet = magnet;
-									setModifier.$set["season."+season_number+".episode."+parseInt(numbers[1])+".magnet"] = magnet;
-									updated_episodes.push(parseInt(numbers[1]));
+				};
+				if(has_em_all) callback(show);
+				else if(lonely_episode){
+					get_magnet(show, lonely_episode, (function (callback, show, episode, magnet) {
+						show["season"][""+episode.season_number+""]["episode"][""+episode.episode_number+""].magnet = magnet;
+						callback(show);
+					}).bind(undefined, callback, show, lonely_episode))
+				} else {
+					search_piratebay(show.name+" S"+leading_zero(season_number)+"E*", (function (callback, show, season_number, results) {
+						//modify show
+						var updated_episodes = [];
+						var setModifier = { $set: {} };
+						for (var i = 0, l = results.length; i < l; i++) {
+							var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
+							regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+							var re = new RegExp(regexed_name+"[. ]?s[0-9]{2}e[0-9]{2}", "i");
+							var match = results[i].name.match(re);
+							if(match && match.length>0){
+								var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
+								var numbers = match[0].match(/[0-9]{2}/g)
+								if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
+									var magnet = {
+										"timestamp": Date.now(),
+										"piratebay": results[i]
+									}
+									if(show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""]){
+										show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""].magnet = magnet;
+										setModifier.$set["season."+season_number+".episode."+parseInt(numbers[1])+".magnet"] = magnet;
+										updated_episodes.push(parseInt(numbers[1]));
+									}
 								}
 							}
-						}
-					};
+						};
 
-					callback(show)
+						callback(show)
 
-					//log in db
-					db.shows.update({
-						id: parseInt(show.id)
-					}, setModifier, { upsert: true }, function (){
-						console.log(" ... updated all magnets for "+(show.name?show.name:"")+" season "+season_number);
-					});
-				}).bind(undefined, callback, show, season_number));
-			}
-		} else callback(false);
-	}).bind(undefined, callback, season_number));
+						//log in db
+						db.shows.update({
+							id: parseInt(show.id)
+						}, setModifier, { upsert: true }, function (){
+							console.log(" ... updated all magnets for "+(show.name?show.name:"")+" season "+season_number);
+						});
+					}).bind(undefined, callback, show, season_number));
+				}
+			} else callback(false);
+		}).bind(undefined, callback, season_number));
+	} else callback(false);
 }
 
 
@@ -1180,7 +1236,7 @@ function search_piratebay (query, callback) {
 	console.log("------------------------- > internet connection (tpb), querying '"+query+"'")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query+'/0/7/'+video_quality,
+			url: 'http://thepiratebay.se/search/'+query.trim()+'/0/7/'+video_quality,
 			gzip: 'true'
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
@@ -1540,8 +1596,8 @@ function mark_as_watched (id, season, episode, reply) {
 			{ id: parseInt(id) },
 			{ $set:
 				{ last_watched: {
-					"season": season,
-					"episode": episode,
+					"season": parseInt(season),
+					"episode": parseInt(episode),
 					"timestamp": Date.now()
 				} }
 			}, {}, function () {
@@ -1552,13 +1608,13 @@ function mark_as_watched (id, season, episode, reply) {
 		db.shows.findOne({id: parseInt(id)}, function (err, show) {
 			if(show){
 				find_latest_episode_of_show(show, function (latest_episode, show) {
-					if(latest_episode){
+					if(latest_episode && latest_episode.season_number && latest_episode.episode_number){
 						db.shows.update(
 							{ id: show.id },
 							{ $set:
 								{ last_watched: {
-									"season": latest_episode.season_number,
-									"episode": latest_episode.episode_number,
+									"season": parseInt(latest_episode.season_number),
+									"episode": parseInt(latest_episode.episode_number),
 									"timestamp": Date.now()
 								} }
 							}, {}, (function (show) {
@@ -1593,6 +1649,8 @@ function handle_stream (info, id, player){
 	stream_summary.season = parseInt(stream_summary.season[0]);
 	stream_summary.showName = stream_summary.showName[0].trim();
 	stream_summary.monitorCounter = 0;
+	stream_summary.logged_end = false;
+	stream_summary.logged_start = false;
 	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
 
 	if(player=="mpv"){
@@ -1606,7 +1664,6 @@ function monitor_mpv (){
 	console.log("monitor mpv");
 	if(stream_summary.reopen == undefined) stream_summary.reopen = true;
 	if(stream_summary.can_log == undefined) stream_summary.can_log = true;
-	stream_summary.logged_end = false;
 
 	if(!socket){
 		socket = require('net').Socket();
@@ -1709,6 +1766,10 @@ function monitor_vlc (){
 			if(data_line == "> "+stream_summary.title){
 				if(stream_summary.temp_result && stream_summary.temp_request){
 					stream_summary[stream_summary.temp_request] = stream_summary.temp_result;
+					if(!stream_summary.logged_start && stream_summary.duration && stream_summary.progress){
+						log_show_progress(stream_summary)
+						stream_summary.logged_start = true;
+					}
 				}
 			} else if(data_line && (simplify_str(data_line) == simplify_str("> http://127.0.0.1:8375/")) && !stream_summary.duration){
 				console.log("title not there yet")
@@ -1795,7 +1856,8 @@ function log_show_progress (stream_summary) {
 			db.shows.findOne({id: parseInt(stream_summary.showId)}, function (err, doc) {
 				if(doc){
 					find_ep_to_watch(doc, function (episode, show) {
-						get_magnet(show, episode, function(){});
+						if(episode)
+							get_magnet(show, episode, function(){});
 					});
 				}
 			});
