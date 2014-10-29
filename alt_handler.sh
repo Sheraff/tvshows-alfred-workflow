@@ -59,17 +59,13 @@ elif [[ $case_letter == "c" ]] ; then
 	id=$(echo $QUERY| cut -d " " -f1)
 	season=$(echo $QUERY| cut -d " " -f2)
 	episode=$(echo $QUERY| cut -d " " -f3)
-	magnet=$(echo $QUERY| cut -d " " -f4)
-	title=${QUERY:$[${#id}+${#season}+${#episode}+${#magnet}]+4}
+	title=${QUERY:$[${#id}+${#season}+${#episode}]+3}
 
-	echo $id
-	echo $season
-	echo $episode
-	echo $magnet
-	echo $title
-
-	open -g "$magnet"
 	terminal-notifier -title "Downloading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
+
+	# get magnet
+	until magnet=$(curl 127.0.0.1:8374 -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	open -g "$magnet"
 
 	# find and kill any instance of peerflix & player we're responsible for
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
@@ -97,13 +93,18 @@ elif [[ $case_letter == "w" ]] ; then
 
 # case "m" for magnet (default with progress=0)
 elif [[ $case_letter == "m" ]] ; then
+	start_server
 
 	id=$(echo $QUERY| cut -d " " -f1)
-	progress=$(echo ${QUERY:${#id}}| cut -d " " -f1)
-	magnet=$(echo ${QUERY:$[${#progress}+${#id}]+2}| cut -d " " -f1)
-	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
+	season=$(echo $QUERY| cut -d " " -f2)
+	episode=$(echo $QUERY| cut -d " " -f3)
+	progress=$(echo $QUERY| cut -d " " -f4)
+	title=${QUERY:$[${#id}+${#progress}+${#season}+${#episode}]+4}
 
-	open -g "$magnet"
 	terminal-notifier -title "Downloading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
+
+	# get magnet
+	until magnet=$(curl 127.0.0.1:8374 -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	open -g "$magnet"
 
 fi

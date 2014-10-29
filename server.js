@@ -91,6 +91,9 @@ http.createServer(function (req, res) {
 				else
 					mark_as_watched(post['mark_watched'], true);
 
+			else if(post['magnet_id'])
+				respond_with_magnet(post['magnet_id'], post['season'], post['episode']);
+
 			else
 				use_query(post['query']);
 
@@ -149,17 +152,26 @@ function homepage() {
 		one_more_thing_to_do();
 		db.shows.findOne({ id: parseInt(stream_summary.showId) }, function (err, doc) {
 			var episode = doc.season[""+stream_summary.season+""].episode[""+stream_summary.episode+""];
-			var item = w.add((stream_summary.logged_start?"Playing":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
-			if(stream_summary.logged_start)
-				item.subtitle = "Seen "+Math.round(100*stream_summary.progress/stream_summary.duration)+"%. Enter to stop streaming.";
-			else
-				item.subtitle = "Enter to abort streaming.";
-			item.subtitle += " ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
-			if(doc.fav) item.subtitle = "♥ "+item.subtitle;
+			var item = w.add((stream_summary.logged_start?"Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
+			if(stream_summary.logged_start){
+				item.subtitle = "Stop streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
+				item.alt = 		"Stop streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just stop streaming )"
+				item.cmd = 		"Stop streaming and mark as watched ( release ⌥ to just stop streaming, ⌥+Enter to download instead )"
+			}
+			else{
+				item.subtitle = "Abort streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
+				item.alt = 		"Abort streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just abort streaming )"
+				item.cmd = 		"Abort streaming and mark as watched ( release ⌥ to just abort streaming, ⌥+Enter to download instead )"
+			}
+			if(doc.fav){
+				item.subtitle = "♥ "+item.subtitle;
+				item.alt = "♥ "+item.alt;
+				item.cmd = "♥ "+item.cmd;
+			}
 
 			one_more_thing_to_do();
 			get_magnet (doc, episode, (function (doc, item, magnet) {
-				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+(magnet.piratebay?magnet.piratebay.magnetLink:"false")+" "+doc.name;// cID s e magnet name
+				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+doc.name;
 				try_to_output();
 			}).bind(undefined, doc, item))
 
@@ -403,10 +415,10 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 						if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100){
 							item.subtitle = "Resume watching at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
 							item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
-							item.arg = "m"+show.id+" "+(episode.progress || 0)+" "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
+							item.arg = "m"+show.id+" "+episode.season_number+" "+episode.episode_number+" "+(episode.progress || 0)+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
 						} else {
 							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+episode.magnet.piratebay.seeders;
-							item.arg = "m"+show.id+" 0 "+episode.magnet.piratebay.magnetLink+" "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
+							item.arg = "m"+show.id+" "+episode.season_number+" "+episode.episode_number+" 0 "+show.name+", "+formatted_episode_number(episode)+": "+episode.name;
 						}
 						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
 					} else {
@@ -535,7 +547,7 @@ function complete_output_2 (doc, callup, calldown){
 					}
 				}
 				if(magnet.piratebay){
-					item.arg = "m"+doc.id+" "+(episode.progress || 0)+" "+magnet.piratebay.magnetLink+" "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
+					item.arg = "m"+doc.id+" "+episode.season_number+" "+episode.episode_number+" "+(episode.progress || 0)+" "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
 					item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
 				}
 				callback();
@@ -1574,6 +1586,38 @@ function toggle_fav (id, bool, reply) {
 	db.shows.update({ id: parseInt(id) }, { $set: { fav: fav } }, {}, (function (err, numReplaced) {
 		console.log(fav?"added to favorites":"removed from favorites")
 	}).bind(undefined, fav));
+}
+
+
+///////////////////////////
+//  RESPOND WITH MAGNET  //
+///////////////////////////
+
+function respond_with_magnet (id, season, episode){
+	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+	db.shows.findOne({id: parseInt(id)}, (function (season, episode, err, show) {
+		if(!show){
+			console.log("no show");
+			http_response.end(false);
+		}
+		else
+			get_specific_episode(show, parseInt(season), parseInt(episode), function (episode, show) {
+				if(!episode){
+					console.log("no episode")
+					http_response.end(false);
+				}
+				else{
+					get_magnet(show, episode, function (magnet) {
+						if(!magnet || !magnet.piratebay){
+							console.log("no magnet")
+							http_response.end(false);
+						}
+						else
+							http_response.end(magnet.piratebay.magnetLink);
+					})
+				}
+			})
+	}).bind(undefined, season, episode));
 }
 
 

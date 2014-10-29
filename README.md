@@ -35,7 +35,6 @@ If you wish to receive notifications to keep you informed of what might be happe
  - use "season" torrents if nothing else available
  - try and use the 1x01 notation for piratebay search as backup
  - check seed nb before offering streaming (suggest DL instead) (hard to know the threshold!)
- - send arguments without magnet link, call the server from handler.sh to get magnet link. That allows for more time to find the best magnet.
 
 ### 2. STREAMING
  - kill player before I kill peerflix
@@ -49,3 +48,4 @@ If you wish to receive notifications to keep you informed of what might be happe
 ### 4. MISC
  - handle cases where there is no internet / results from mdb or piratebay are unavailable
  - when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
+ - clean DB in post-processing: things we know will require re-fetching should be deleted

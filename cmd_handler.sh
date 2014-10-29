@@ -103,10 +103,11 @@ elif [[ $case_letter == "m" ]] ; then
 	fi
 
 	id=$(echo $QUERY| cut -d " " -f1)
-	progress=$(echo ${QUERY:${#id}}| cut -d " " -f1)
-	magnet=$(echo ${QUERY:$[${#progress}+${#id}]+2}| cut -d " " -f1)
-	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
+	season=$(echo $QUERY| cut -d " " -f2)
+	episode=$(echo $QUERY| cut -d " " -f3)
+	progress=$(echo $QUERY| cut -d " " -f4)
+	title=${QUERY:$[${#id}+${#progress}+${#season}+${#episode}]+4}
 
-	echo "m$id 0 $magnet $title"
+	echo "m$id $season $episode 0 $title"
 
 fi

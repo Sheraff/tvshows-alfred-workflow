@@ -25,6 +25,8 @@ function start_server {
 
 # case "m" for magnet
 if [[ $case_letter == "m" ]] ; then
+	start_server
+
 	# wait for peerflix
 	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
 		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
@@ -32,14 +34,16 @@ if [[ $case_letter == "m" ]] ; then
 
 	# parsing input
 	id=$(echo $QUERY| cut -d " " -f1)
-	progress=$(echo ${QUERY:${#id}}| cut -d " " -f1)
-	magnet=$(echo ${QUERY:$[${#progress}+${#id}]+2}| cut -d " " -f1)
-	title=${QUERY:$[${#magnet}+${#progress}+${#id}]+3}
+	season=$(echo $QUERY| cut -d " " -f2)
+	episode=$(echo $QUERY| cut -d " " -f3)
+	progress=$(echo $QUERY| cut -d " " -f4)
+	title=${QUERY:$[${#id}+${#progress}+${#season}+${#episode}]+4}
 
 	# send notification
 	terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
 
-	start_server
+	# get magnet
+	until magnet=$(curl 127.0.0.1:8374 -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 
 	# start peerflix
 	if hash mpv 2> /dev/null; then
