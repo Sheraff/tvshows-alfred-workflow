@@ -158,7 +158,7 @@ function homepage() {
 				find_ep_to_watch(doc, (function (current_episode, next_episode, show) {
 					get_magnet(show, next_episode, (function (show, current_episode, next_episode, magnet) {
 						if(next_episode && magnet.piratebay){
-							var item = w.add("Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%) "+show.name+" "+formatted_episode_number(current_episode)+(pretty_string(current_episode.name)?" — "+current_episode.name:""), 1);
+							var item = w.add("▶ Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%) "+show.name+" "+formatted_episode_number(current_episode)+(pretty_string(current_episode.name)?" — "+current_episode.name:""), 1);
 							item.subtitle = (doc.fav?"♥ ":"")+"Skip to next episode: "+show.name+" "+formatted_episode_number(next_episode)+(pretty_string(next_episode.name)?" — "+next_episode.name:"");
 							item.arg = "m"+show.id+" "+next_episode.season_number+" "+next_episode.episode_number+" 0 "+show.name+", "+formatted_episode_number(next_episode)+": "+next_episode.name;
 							one_more_thing_to_do();
@@ -173,7 +173,7 @@ function homepage() {
 					}).bind(undefined, show, current_episode, next_episode))
 				}).bind(undefined, episode))
 			} else {
-				var item = w.add((stream_summary.logged_start?"Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
+				var item = w.add((stream_summary.logged_start?"▶ Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
 				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+doc.name;
 
 				if(stream_summary.logged_start){
@@ -259,7 +259,7 @@ function homepage2 (top_show_id) {
 		one_more_thing_to_do();
 		search_on_mdb("miscTopRatedTvs", function (results) {
 			for (var i = 0, l = results.length; i < l; i++) {
-				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs)) && results[i].id != top_show_id){
+				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs)) && (!is_streaming || stream_summary.showId != results[i].id) && results[i].id != top_show_id){
 					one_more_thing_to_do();
 					simple_output(results[i], try_to_output);
 				}
