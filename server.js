@@ -152,39 +152,86 @@ function homepage() {
 		one_more_thing_to_do();
 		db.shows.findOne({ id: parseInt(stream_summary.showId) }, function (err, doc) {
 			var episode = doc.season[""+stream_summary.season+""].episode[""+stream_summary.episode+""];
-			var item = w.add((stream_summary.logged_start?"Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
-			if(stream_summary.logged_start){
-				item.subtitle = "Stop streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
-				item.alt = 		"Stop streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just stop streaming )"
-				item.cmd = 		"Stop streaming and mark as watched ( release ⌥ to just stop streaming, ⌥+Enter to download instead )"
-			}
-			else{
-				item.subtitle = "Abort streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
-				item.alt = 		"Abort streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just abort streaming )"
-				item.cmd = 		"Abort streaming and mark as watched ( release ⌥ to just abort streaming, ⌥+Enter to download instead )"
-			}
-			if(doc.fav){
-				item.subtitle = "♥ "+item.subtitle;
-				item.alt = "♥ "+item.alt;
-				item.cmd = "♥ "+item.cmd;
-			}
 
-			one_more_thing_to_do();
-			get_magnet (doc, episode, (function (doc, item, magnet) {
+			if(stream_summary.logged_end){
+				one_more_thing_to_do();
+				find_ep_to_watch(doc, (function (current_episode, next_episode, show) {
+					get_magnet(show, next_episode, (function (show, current_episode, next_episode, magnet) {
+						if(next_episode && magnet.piratebay){
+							var item = w.add("Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%) "+show.name+" "+formatted_episode_number(current_episode)+(pretty_string(current_episode.name)?" — "+current_episode.name:""), 1);
+							item.subtitle = (doc.fav?"♥ ":"")+"Skip to next episode: "+show.name+" "+formatted_episode_number(next_episode)+(pretty_string(next_episode.name)?" — "+next_episode.name:"");
+							item.arg = "m"+show.id+" "+next_episode.season_number+" "+next_episode.episode_number+" 0 "+show.name+", "+formatted_episode_number(next_episode)+": "+next_episode.name;
+							one_more_thing_to_do();
+							fs.exists(imgs_folder+"/"+show.id+".jpg", (function (item, name, exists) {
+								item.icon = exists?name:"icon.png";
+								try_to_output();
+							}).bind(undefined, item, imgs_folder+"/"+show.id+".jpg"));
+						} else {
+							complete_oneline_output(show, one_more_thing_to_do, try_to_output, 0);
+						}
+						try_to_output();
+					}).bind(undefined, show, current_episode, next_episode))
+				}).bind(undefined, episode))
+			} else {
+				var item = w.add((stream_summary.logged_start?"Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
 				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+doc.name;
-				try_to_output();
-			}).bind(undefined, doc, item))
 
-			one_more_thing_to_do();
-			fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
-				item.icon = exists?name:"icon.png";
-				try_to_output();
-			}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
+				if(stream_summary.logged_start){
+					item.subtitle = "Stop streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
+					item.alt = 		"Stop streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just stop streaming )"
+					item.cmd = 		"Stop streaming and mark as watched ( release ⌘ to just stop streaming, ⌥+Enter to download instead )"
+				} else {
+					item.subtitle = "Abort streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
+					item.alt = 		"Abort streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just abort streaming )"
+					item.cmd = 		"Abort streaming and mark as watched ( release ⌘ to just abort streaming, ⌥+Enter to download instead )"
+				}
+				if(doc.fav){
+					item.subtitle = "♥ "+item.subtitle;
+					item.alt = "♥ "+item.alt;
+					item.cmd = "♥ "+item.cmd;
+				}
+
+				item.autocomplete = doc.name+" ";
+
+				one_more_thing_to_do();
+				fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
+					item.icon = exists?name:"icon.png";
+					try_to_output();
+				}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
+			}
 
 			try_to_output();
 		})
-	}
+		homepage2();
+	} else {
+		one_more_thing_to_do();
+		db.shows.find({ "last_watched": { $exists: true } }).sort({ "last_watched.timestamp": -1 }).limit(1).exec(function (err, docs) {
+			if(docs){
+				one_more_thing_to_do();
+				find_ep_to_watch(docs[0], function (episode, show) {
+					get_magnet(show, episode, (function (show, episode, magnet) {
+						if(episode && magnet.piratebay){
+							// var item = w.add(show.name, 1);
+							// item.subtitle = "bute";
 
+							one_more_thing_to_do();
+							complete_oneline_output(show, one_more_thing_to_do, try_to_output, -5);
+							homepage2(show.id);
+						} else {
+							homepage2();
+						}
+						try_to_output();
+					}).bind(undefined, show, episode));
+				});
+			} else {
+				homepage2();
+			}
+			try_to_output();
+		});
+	}
+}
+
+function homepage2 (top_show_id) {
 	one_more_thing_to_do();
 	db.shows.find({ fav: true }, function (err, docs) {
 		if(docs){
@@ -201,9 +248,9 @@ function homepage() {
 				else return 0;
 			});
 			for (var l = docs.length, i = l - 1; i >= 0; i--) {
-				if(!is_streaming || stream_summary.showId != docs[i].id){
+				if((!is_streaming || stream_summary.showId != docs[i].id) && top_show_id != docs[i].id){
 					one_more_thing_to_do();
-					complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i - 1);
+					complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i);
 				}
 			};
 		}
@@ -212,7 +259,7 @@ function homepage() {
 		one_more_thing_to_do();
 		search_on_mdb("miscTopRatedTvs", function (results) {
 			for (var i = 0, l = results.length; i < l; i++) {
-				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs))){
+				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs)) && results[i].id != top_show_id){
 					one_more_thing_to_do();
 					simple_output(results[i], try_to_output);
 				}
@@ -363,7 +410,8 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 	}).bind(undefined, (function (callup, calldown, result, order_range, subtitle) {
 		//add result
 		var item = w.add(result.name, order_range);
-		item.subtitle = "♥ "+subtitle;
+		if(result.fav) subtitle = "♥ "+subtitle;
+		item.subtitle = subtitle;
 		item.autocomplete = result.name+" ";
 		item.valid = "NO";
 		item.uid = "result.name";
@@ -452,8 +500,7 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 						item.valid = "NO";
 						if(show.last_watched && show.last_watched.season == season_number && show.last_watched.episode == episode.episode_number){
 							item.subtitle = "This is the last episode you watched."+(show.last_watched.progress && show.last_watched.duration ? " You stopped at "+percent_progress(episode)+"%." : "");
-						}
-						if(date_from_tmdb_format(episode.air_date)>Date.now()){
+						} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1){
 							item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
 						}
 					}
@@ -1810,6 +1857,10 @@ function monitor_vlc (){
 			if(data_line == "> "+stream_summary.title){
 				if(stream_summary.temp_result && stream_summary.temp_request){
 					stream_summary[stream_summary.temp_request] = stream_summary.temp_result;
+					if(!stream_summary.logged_end && stream_summary.duration && stream_summary.progress && stream_summary.progress/stream_summary.duration > percent_to_consider_watched+.01){
+						log_show_progress(stream_summary)
+						stream_summary.logged_end = true;
+					}
 					if(!stream_summary.logged_start && stream_summary.duration && stream_summary.progress){
 						log_show_progress(stream_summary)
 						stream_summary.logged_start = true;

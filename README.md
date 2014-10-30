@@ -33,7 +33,7 @@ If you wish to receive notifications to keep you informed of what might be happe
 
 ### 1. TORRENT
  - use "season" torrents if nothing else available
- - try and use the 1x01 notation for piratebay search as backup
+ - **high priority** try and use the 1x01 notation for piratebay search as backup
  - check seed nb before offering streaming (suggest DL instead) (hard to know the threshold!)
 
 ### 2. STREAMING
@@ -42,7 +42,6 @@ If you wish to receive notifications to keep you informed of what might be happe
 
 ### 3. INTERFACE
  - read user prefs from file
- - differentiate "actively following" from "rewatching an already out series" so that the homepage can display NEW EPISODE for the actively followed shows
  - better no-result case
 
 ### 4. MISC
