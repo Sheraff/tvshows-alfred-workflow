@@ -3,13 +3,15 @@ export PATH=/usr/local/bin:$PATH
 QUERY="$1"
 bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
+data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 NODE_PID="${cache}/node.pid"
 node="/usr/local/bin/node"
 init=$(date +%s);
 
 
-# make the cache dir if it doesn't exit
+# make the directories if they don't exit
 [[ ! -d "${cache}" ]] && mkdir -p "${cache}"
+[[ ! -d "${data}" ]] && mkdir -p "${data}"
 
 # kickoff server if it isn't running
 if [[ ! -f ${NODE_PID} ]] || ( ! ps -p $(cat "${NODE_PID}") > /dev/null ); then
