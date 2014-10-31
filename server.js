@@ -109,24 +109,25 @@ initialize();
 function initialize () {
 	//things to do right away
 
-	//things that can wait a second
-	setTimeout(function () {
-		if(!db.queries_history) db.queries_history = new Datastore({ filename: w.cache+"/queries_history.db", autoload: true });
-		if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-		if(!cheerio) cheerio = require('cheerio');
-		if(!mdb) mdb = require('moviedb')(mdb_API_key);
-		if(!request) request = require('request');
-		if(!exec) exec = require('child_process').exec;
-		if(!fs.existsSync(summaries_folder)) fs.mkdirSync(summaries_folder);
-		if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
-		if(!fs.existsSync(episodes_folder)) fs.mkdirSync(episodes_folder);
-		delayed_images_interval = setInterval(function () {
-			for (var i = Math.min(5, delayed_images.length); i > 0; i--) {
-				var img = delayed_images.shift();
-				dl_image(imgs_folder+"/"+img.id, img.path);
-			};
-		}, 2000);
+	delayed_images_interval = setInterval(function () {
+		for (var i = Math.min(5, delayed_images.length); i > 0; i--) {
+			var img = delayed_images.shift();
+			dl_image(imgs_folder+"/"+img.id, img.path);
+		};
 	}, 2000);
+}
+
+function finish_initializing () {
+	//things that can wait a second
+	if(!db.queries_history) db.queries_history = new Datastore({ filename: w.cache+"/queries_history.db", autoload: true });
+	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+	if(!cheerio) cheerio = require('cheerio');
+	if(!mdb) mdb = require('moviedb')(mdb_API_key);
+	if(!request) request = require('request');
+	if(!exec) exec = require('child_process').exec;
+	if(!fs.existsSync(summaries_folder)) fs.mkdirSync(summaries_folder);
+	if(!fs.existsSync(imgs_folder)) fs.mkdirSync(imgs_folder);
+	if(!fs.existsSync(episodes_folder)) fs.mkdirSync(episodes_folder);
 }
 
 
@@ -249,6 +250,33 @@ function search_for_show (query) {
 
 	query = corrected_query || query;
 
+	// maybe we have that exact show in store already
+	if(query.charAt(query.length-1)===" " && query.trim().length>0){
+		if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+		var re = new RegExp("^"+query.trim()+"$", "i");
+		db.shows.findOne({ name: { $regex: re } }, function (err, doc) {
+			if(doc){
+				doc.comes_from_db_already = true;
+				if(!doc.timestamp || !doc.season || check_time_with(doc.timestamp, show_expiration) == -1){
+					// notification because this might take some time
+					console.log("notify");
+					if(!exec) exec = require('child_process').exec;
+					exec(("/usr/bin/terminal-notifier -title \""+(doc.name || "New TV show")+"\" -message \"Fetching data, might take a sec...\""+(doc.id?" -contentImage \""+imgs_folder+"/"+doc.id+".jpg\"":"")+" &"), function(){});
+				}
+				if(corrected_query)
+					browse(doc, season, episode, one_more_thing_to_do, try_to_output);
+				else
+					complete_output(doc, one_more_thing_to_do, try_to_output);
+			} else {
+				search_for_show2(corrected_query, season, episode, query)
+			}
+		})
+	} else {
+		search_for_show2(corrected_query, season, episode, query)
+	}
+}
+
+function search_for_show2(corrected_query, season, episode, query){
 	//search_on_mdb
 	search_on_mdb (query, (function (corrected_query, season, episode, query, results) {
 
@@ -273,7 +301,7 @@ function search_for_show (query) {
 
 
 		//single result: complete info
-		if((only_one_good_show || exact_match ) && (query.slice(-1)==" ") || corrected_query){
+		if((only_one_good_show || exact_match ) && (query.charAt(query.length-1)===" ") || corrected_query){
 			if(corrected_query)
 				browse(only_one_good_show || exact_match, season, episode, one_more_thing_to_do, try_to_output);
 			else
@@ -406,19 +434,24 @@ function browse (result, season, episode, callup, calldown) {
 	if(season) season = parseInt(season);
 	if(episode) episode = parseInt(episode);
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-	callup();
-	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, season, episode, err, doc) {
-		if(doc){
-			browse2(doc, season, episode, callup, calldown)
-		} else {
-			callup();
-			detail_show(result, (function (season, episode, callup, calldown, doc) {
+
+	if(result.comes_from_db_already)
+		browse2(result, season, episode, callup, calldown)
+	else{
+		callup();
+		db.shows.findOne({ id: result.id }, (function (callup, calldown, result, season, episode, err, doc) {
+			if(doc){
 				browse2(doc, season, episode, callup, calldown)
-				calldown();
-			}).bind(undefined, season, episode, callup, calldown));
-		}
-		calldown();
-	}).bind(undefined, callup, calldown, result, season, episode));
+			} else {
+				callup();
+				detail_show(result, (function (season, episode, callup, calldown, doc) {
+					browse2(doc, season, episode, callup, calldown)
+					calldown();
+				}).bind(undefined, season, episode, callup, calldown));
+			}
+			calldown();
+		}).bind(undefined, callup, calldown, result, season, episode));
+	}
 }
 
 function browse2 (doc, season_number, episode_number, callup, calldown) {
@@ -513,21 +546,20 @@ function browse2 (doc, season_number, episode_number, callup, calldown) {
 
 function complete_output (result, callup, calldown) {
 	console.log("complete_output");
-	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
-		if(!doc || !doc.timestamp || !doc.season || check_time_with(doc.timestamp, show_expiration) == -1){
-			//this might take some time notification
-			if(!exec) exec = require('child_process').exec;
-			exec(("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, might take a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":"")), function(){});
-		}
-		if(doc){
-			complete_output_2(doc, callup, calldown)
-		} else {
-			detail_show(result, (function (callup, calldown, doc) {
-				complete_output_2 (doc, callup, calldown)
-			}).bind(undefined, callup, calldown));
-		}
-	}).bind(undefined, callup, calldown, result));
+	if(result.comes_from_db_already)
+		complete_output_2(result, callup, calldown)
+	else{
+		if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+		db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
+			if(doc){
+				complete_output_2(doc, callup, calldown)
+			} else {
+				detail_show(result, (function (callup, calldown, doc) {
+					complete_output_2 (doc, callup, calldown)
+				}).bind(undefined, callup, calldown));
+			}
+		}).bind(undefined, callup, calldown, result));
+	}
 }
 
 function complete_output_2 (doc, callup, calldown){
@@ -560,7 +592,7 @@ function complete_output_2 (doc, callup, calldown){
 			if(episode){
 				//get magnet
 				callup();
-				get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
+				get_magnet(doc, episode, (function (callback, item, episode, doc, magnet) {
 					if(episode.progress && episode.progress>30){
 						if(magnet.piratebay){
 							item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
@@ -595,7 +627,7 @@ function complete_output_2 (doc, callup, calldown){
 						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
 					}
 					callback();
-				}).bind(undefined, calldown, episode, doc))
+				}).bind(undefined, calldown, item, episode, doc))
 			} else {
 				console.log("found nothing to watch for "+doc.name);
 				item.valid="NO";
@@ -616,9 +648,10 @@ function complete_output_2 (doc, callup, calldown){
 		if(episode){
 			callup();
 			get_episode_after_episode(doc, episode, (function (calldown, next_episode, doc) {
+				var item = w.add("", 2);
 				if(next_episode) {
-					get_magnet(doc, next_episode, (function (calldown, episode, doc, magnet) {
-						var item = w.add("Following episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" ), 2);
+					get_magnet(doc, next_episode, (function (calldown, item, episode, doc, magnet) {
+						item.title = "Following episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(magnet && magnet.piratebay){
 							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
 							item.arg = "m"+doc.id+" "+episode.season_number+" "+episode.episode_number+" 0 "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
@@ -637,9 +670,9 @@ function complete_output_2 (doc, callup, calldown){
 							item.valid="NO";
 						}
 						calldown();
-					}).bind(undefined, calldown, next_episode, doc))
+					}).bind(undefined, calldown, item, next_episode, doc))
 				} else {
-					var item = w.add("---", 2);
+					item.title = "---";
 					item.valid="NO";
 					if(doc.status != "Ended")
 						item.subtitle = "Following episode has yet to be revealed";
@@ -709,6 +742,7 @@ function try_to_output(){
 		countDownToEcho=0;
 		console.log("try_to_output: passed");
 		http_response.end(w.echo());
+		finish_initializing();
 	}
 }
 
@@ -1144,6 +1178,7 @@ function search_on_mdb (query, callback) {
 		if(doc && check_time_with(doc.timestamp, search_expiration) == 1 ){
 			callback(doc.results || false);
 		} else {
+			// do the actual search
 			console.log("------------------------------------ > internet connection (mdb)")
 			if(!mdb) mdb = require('moviedb')(mdb_API_key);
 			mdb[(query=='miscTopRatedTvs'?'miscTopRatedTvs':'searchTv')]((query=='miscTopRatedTvs'?{}:{query: query.trim(), page: 1, search_type: "ngram"}), (function (callback, query, err, res) {
@@ -1717,14 +1752,41 @@ function respond_with_magnet (id, season, episode){
 					http_response.end(false);
 				}
 				else{
-					get_magnet(show, episode, function (magnet) {
-						if(!magnet || !magnet.piratebay){
-							console.log("no magnet")
-							http_response.end(false);
-						}
-						else
-							http_response.end(magnet.piratebay.magnetLink);
-					})
+					get_magnet(show, episode, (function (show, episode, magnet) {
+						search_piratebay(show.name+" "+episode.season_number+"x"+leading_zero(episode.episode_number), (function (show, episode, results) {
+
+							var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
+							regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+							var re = new RegExp(regexed_name+"[. ]?"+episode.season_number+"x"+leading_zero(episode.episode_number), "i");
+
+							var found = false;
+							for (var i = 0, l = results.length; i < l; i++) {
+								var match = results[i].name.match(re);
+								if(match && match.length>0){
+									found = true;
+									break;
+								}
+							};
+
+							if(found && ((!magnet || !magnet.piratebay) || results[i].seeders > magnet.piratebay.seeders)){
+								magnet = {
+									"timestamp": Date.now(),
+									"piratebay": results[i]
+								}
+								console.log("found good SxEE magnet");
+							}
+
+							if(!magnet || !magnet.piratebay){
+								console.log("no magnet")
+								http_response.end(false);
+							}
+							else{
+								console.log("sending magnet "+magnet.piratebay.name);
+								http_response.end(magnet.piratebay.magnetLink);
+							}
+
+						}).bind(undefined, show, episode))
+					}).bind(undefined, show, episode))
 				}
 			})
 	}).bind(undefined, season, episode));
