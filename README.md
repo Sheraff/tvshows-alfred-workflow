@@ -33,7 +33,7 @@ If you wish to receive notifications to keep you informed of what might be happe
 
 ### 1. TORRENT
  - use "season" torrents if nothing else available
- - **high priority** try and use the 1x01 notation for piratebay search as backup
+ - **high priority** try and use the 1x01 notation for piratebay search as backup in regular get_magnet (not only on respond_with_magnet)
  - check seed nb before offering streaming (suggest DL instead) (hard to know the threshold!)
 
 ### 2. STREAMING
@@ -46,5 +46,4 @@ If you wish to receive notifications to keep you informed of what might be happe
 
 ### 4. MISC
  - handle cases where there is no internet / results from mdb or piratebay are unavailable
- - when all shows have to refresh at the same time on startup, it takes forever. Only refresh the most likely to need so (not the ended, not supposed to have a new episode out, or with which the user isn't up to date).
  - clean DB in post-processing: things we know will require re-fetching should be deleted

@@ -136,6 +136,7 @@ function initialize () {
 
 function use_query (query) {
 	console.log("use_query: "+query);
+	w.zero();
 	query = query.trimLeft().replace(/\s{2,}/g, " ");
 	if(query && query!="miscTopRatedTvs")
 		search_for_show(query)
@@ -151,56 +152,17 @@ function homepage() {
 	if(is_streaming){
 		one_more_thing_to_do();
 		db.shows.findOne({ id: parseInt(stream_summary.showId) }, function (err, doc) {
-			var episode = doc.season[""+stream_summary.season+""].episode[""+stream_summary.episode+""];
-
-			if(stream_summary.logged_end){
-				one_more_thing_to_do();
-				find_ep_to_watch(doc, (function (current_episode, next_episode, show) {
-					get_magnet(show, next_episode, (function (show, current_episode, next_episode, magnet) {
-						if(next_episode && magnet.piratebay){
-							var item = w.add("▶ Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%) "+show.name+" "+formatted_episode_number(current_episode)+(pretty_string(current_episode.name)?" — "+current_episode.name:""), 1);
-							item.subtitle = (doc.fav?"♥ ":"")+"Skip to next episode: "+show.name+" "+formatted_episode_number(next_episode)+(pretty_string(next_episode.name)?" — "+next_episode.name:"");
-							item.arg = "m"+show.id+" "+next_episode.season_number+" "+next_episode.episode_number+" 0 "+show.name+", "+formatted_episode_number(next_episode)+": "+next_episode.name;
-							one_more_thing_to_do();
-							fs.exists(imgs_folder+"/"+show.id+".jpg", (function (item, name, exists) {
-								item.icon = exists?name:"icon.png";
-								try_to_output();
-							}).bind(undefined, item, imgs_folder+"/"+show.id+".jpg"));
-						} else {
-							complete_oneline_output(show, one_more_thing_to_do, try_to_output, 0);
-						}
-						try_to_output();
-					}).bind(undefined, show, current_episode, next_episode))
-				}).bind(undefined, episode))
-			} else {
-				var item = w.add((stream_summary.logged_start?"▶ Playing ("+Math.round(100*stream_summary.progress/stream_summary.duration)+"%)":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:""), 1);
-				item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+doc.name;
-
-				if(stream_summary.logged_start){
-					item.subtitle = "Stop streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
-					item.alt = 		"Stop streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just stop streaming )"
-					item.cmd = 		"Stop streaming and mark as watched ( release ⌘ to just stop streaming, ⌥+Enter to download instead )"
-				} else {
-					item.subtitle = "Abort streaming ( ⌘+Enter to skip & mark as watched, ⌥+Enter to download instead of streaming )";
-					item.alt = 		"Abort streaming and download torrent ( ⌘+Enter to skip & mark as watched, release ⌥ to just abort streaming )"
-					item.cmd = 		"Abort streaming and mark as watched ( release ⌘ to just abort streaming, ⌥+Enter to download instead )"
-				}
-				if(doc.fav){
-					item.subtitle = "♥ "+item.subtitle;
-					item.alt = "♥ "+item.alt;
-					item.cmd = "♥ "+item.cmd;
-				}
-
-				item.autocomplete = doc.name+" ";
-
-				one_more_thing_to_do();
-				fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
-					item.icon = exists?name:"icon.png";
-					try_to_output();
-				}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
-			}
-
-			try_to_output();
+			var episode = doc.season[stream_summary.season].episode[stream_summary.episode];
+			var item = w.add("▶ "+(stream_summary.logged_start?"Playing":"Loading")+" "+doc.name, 1);
+			item.subtitle = (doc.fav?"♥ ":"")
+			item.subtitle += (stream_summary.logged_start?"("+(stream_summary.duration?"":"at ")+pretty_seconds(stream_summary.progress)+(stream_summary.duration?" / "+pretty_seconds(stream_summary.duration):"")+") ":"");
+			item.subtitle += formatted_episode_number(episode) + (pretty_string(episode.name)?" — "+episode.name:"");
+			item.autocomplete = doc.name+" ";
+			item.valid = "NO";
+			fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
+				item.icon = exists?name:"icon.png";
+				try_to_output();
+			}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
 		})
 		homepage2();
 	} else {
@@ -211,9 +173,6 @@ function homepage() {
 				find_ep_to_watch(docs[0], function (episode, show) {
 					get_magnet(show, episode, (function (show, episode, magnet) {
 						if(episode && magnet.piratebay){
-							// var item = w.add(show.name, 1);
-							// item.subtitle = "bute";
-
 							one_more_thing_to_do();
 							complete_oneline_output(show, one_more_thing_to_do, try_to_output, -5);
 							homepage2(show.id);
@@ -233,38 +192,38 @@ function homepage() {
 
 function homepage2 (top_show_id) {
 	one_more_thing_to_do();
-	db.shows.find({ fav: true }, function (err, docs) {
-		if(docs){
-			docs = docs.sort(function (a, b) {
-				if(!a.last_watched && !b.last_watched) return 0;
-				else if(a.last_watched && !b.last_watched) return 1;
-				else if(!a.last_watched && b.last_watched) return -1;
-				else if(!a.last_watched.timestamp && !b.last_watched.timestamp) return 0;
-				else if(a.last_watched.timestamp && !b.last_watched.timestamp) return 1;
-				else if(!a.last_watched.timestamp && b.last_watched.timestamp) return -1;
-				else if(a.last_watched.timestamp == b.last_watched.timestamp) return 0;
-				else if(a.last_watched.timestamp > b.last_watched.timestamp) return 1;
-				else if(a.last_watched.timestamp < b.last_watched.timestamp) return -1;
-				else return 0;
-			});
-			for (var l = docs.length, i = l - 1; i >= 0; i--) {
-				if((!is_streaming || stream_summary.showId != docs[i].id) && top_show_id != docs[i].id){
+	db.shows.find({ fav: true }).sort({ "last_watched.timestamp": 1 }).exec(function (err, fav_docs) {
+		if(fav_docs){
+			for (var l = fav_docs.length, i = l - 1; i >= 0; i--) {
+				if((!is_streaming || stream_summary.showId != fav_docs[i].id) && top_show_id != fav_docs[i].id){
 					one_more_thing_to_do();
-					complete_oneline_output(docs[i], one_more_thing_to_do, try_to_output, l - i);
+					complete_oneline_output(fav_docs[i], one_more_thing_to_do, try_to_output, l - i);
 				}
 			};
 		}
 
 		//echo misctv: simple output
 		one_more_thing_to_do();
-		search_on_mdb("miscTopRatedTvs", function (results) {
-			for (var i = 0, l = results.length; i < l; i++) {
-				if(good_enough_show(results[i]) && (!docs || !is_doc_in_docs(results[i].id, docs)) && (!is_streaming || stream_summary.showId != results[i].id) && results[i].id != top_show_id){
-					one_more_thing_to_do();
-					simple_output(results[i], try_to_output);
-				}
+		db.shows.find({ top: { $gt: 0 }}).sort({ "top": -1 }).exec(function(err, top_docs){
+			if(top_docs && top_docs.length>0){
+				for (var i = top_docs.length - 1; i >= 0; i--) {
+					if(good_enough_show(top_docs[i]) && (!fav_docs || !is_doc_in_docs(top_docs[i].id, fav_docs)) && (!is_streaming || stream_summary.showId != top_docs[i].id) && top_docs[i].id != top_show_id){
+						one_more_thing_to_do();
+						simple_output(top_docs[i], try_to_output);
+					}
+				};
+				try_to_output();
+			} else {
+				search_on_mdb("miscTopRatedTvs", function (results) {
+					for (var i = 0, l = results.length; i < l; i++) {
+						if(good_enough_show(results[i]) && (!fav_docs || !is_doc_in_docs(results[i].id, fav_docs)) && (!is_streaming || stream_summary.showId != results[i].id) && results[i].id != top_show_id){
+							one_more_thing_to_do();
+							simple_output(results[i], try_to_output);
+						}
+					}
+					try_to_output();
+				});
 			}
-			try_to_output();
 		});
 
 		try_to_output();
@@ -323,10 +282,17 @@ function search_for_show (query) {
 
 		//multiple results: simple output
 		else {
+			if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
 			for (var i = 0, l = results.length; i < l; i++) {
 				if(good_enough_show(results[i])){
 					one_more_thing_to_do();
-					simple_output(results[i], try_to_output);
+					db.shows.findOne({ id: parseInt(results[i].id) }, (function (result, index, callup, calldown, err, doc) {
+						if(!doc || (!doc.last_watched && !doc.fav)){
+							simple_output(result, calldown);
+						} else {
+							complete_oneline_output(doc, callup, calldown, index);
+						}
+					}).bind(undefined, results[i], i, one_more_thing_to_do, try_to_output));
 				}
 			}
 		}
@@ -366,7 +332,7 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 					order_range = 200;
 					callback(order_range+days_until(episode.air_date), subtitle);
 				} else {
-					get_magnet(doc, episode, (function (callback, subtitle, episode, order_index, magnet) {
+					get_magnet(doc, episode, (function (callback, doc, subtitle, episode, order_index, magnet) {
 						var temp_sub = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(!magnet.piratebay){
 							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 25) == 1){
@@ -375,11 +341,22 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 							} else {
 								temp_sub += " — Torrent unavailable on piratebay.";
 							}
-						} else
-							temp_sub = "Up next: "+temp_sub;
+						} else {
+							var new_ep_flag = false;
+							if(doc.season && doc.season[""+episode.season_number+""]) {
+								var latest_season = find_latest(doc.season);
+								if( latest_season.season_number == episode.season_number && doc.season[""+episode.season_number+""].episode && doc.season[""+episode.season_number+""].episode[""+episode.episode_number+""] ){
+									var latest_episode = find_latest(doc.season[""+episode.season_number+""].episode);
+									if(latest_episode.episode_number == episode.episode_number){
+										new_ep_flag = true;
+									}
+								}
+							}
+							temp_sub = (new_ep_flag?"NEW EPISODE: ":"Up next: ")+temp_sub;
+						}
 						subtitle += temp_sub;
 						callback(order_range + order_index, subtitle);
-					}).bind(undefined, callback, subtitle, episode, order_index))
+					}).bind(undefined, callback, doc, subtitle, episode, order_index))
 				}
 			} else if(doc.status && doc.status=="Ended") {
 				subtitle += "Ended";
@@ -538,12 +515,14 @@ function complete_output (result, callup, calldown) {
 	console.log("complete_output");
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
 	db.shows.findOne({ id: result.id }, (function (callup, calldown, result, err, doc) {
-		if(doc){
-			complete_output_2(doc, callup, calldown)
-		} else {
+		if(!doc || !doc.timestamp || !doc.season || check_time_with(doc.timestamp, show_expiration) == -1){
 			//this might take some time notification
 			if(!exec) exec = require('child_process').exec;
 			exec(("/usr/bin/terminal-notifier -title \""+(result.name || "New TV show")+"\" -message \"Fetching data, might take a sec...\" -sender com.runningwithcrayons.Alfred-2"+(result.id?" -contentImage \""+imgs_folder+"/"+result.id+".jpg\"":"")), function(){});
+		}
+		if(doc){
+			complete_output_2(doc, callup, calldown)
+		} else {
 			detail_show(result, (function (callup, calldown, doc) {
 				complete_output_2 (doc, callup, calldown)
 			}).bind(undefined, callup, calldown));
@@ -560,137 +539,163 @@ function complete_output_2 (doc, callup, calldown){
 	callup();
 	find_ep_to_watch(doc, (function (callup, calldown, episode, doc) {
 		var item = w.add("", 1)
-		if(episode){
-			//get magnet
-			callup();
-			get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
-				if(episode.progress && episode.progress>30){
-					if(magnet.piratebay){
-						item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
-						item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
-						item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
-					}
-					else{
-						item.title = "You stopped at "+percent_progress(episode)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
-						item.subtitle = "but this episode isn't available on piratebay anymore. Press Enter to mark as watched."
-						item.arg = "ws"+doc.id+" "+episode.season_number+" "+episode.episode_number+" "+doc.name;
-					}
-				} else {
-					item.title = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-					if(doc.last_watched)
-						item.title = "Up next: "+item.title;
-					else
-						item.title = "Latest episode: "+item.title;
-					if(magnet && magnet.piratebay){
-						item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
-					} else {
-						if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now())
-							item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
-						else if(episode.air_date && date_from_tmdb_format(episode.air_date) > (Date.now()-25*60*60*1000)) // TODO this case is true even when the episode is totally not out soon
-							item.subtitle = "This episode is airing today, wait a little for the torrent...";
-						else
-							item.subtitle = "Not available on piratebay";
-						item.valid="NO";
-					}
-				}
-				if(magnet.piratebay){
-					item.arg = "m"+doc.id+" "+episode.season_number+" "+episode.episode_number+" "+(episode.progress || 0)+" "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
-					item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
-				}
-				callback();
-			}).bind(undefined, calldown, episode, doc))
-		} else {
-			if(doc.status == "Ended"){
-				item.title = "You have finished this show. Congratulation ;-)";
-				item.subtitle = "Press Enter to mark as not watched";
+		if(is_streaming && stream_summary.showId == doc.id){
+			episode = doc.season[""+parseInt(stream_summary.season)+""].episode[""+parseInt(stream_summary.episode)+""];
+			item.title = (stream_summary.logged_start?"Playing":"Loading")+" "+doc.name+" "+formatted_episode_number(episode)+(pretty_string(episode.name)?" — "+episode.name:"");
+			item.arg = "c"+doc.id+" "+stream_summary.season+" "+stream_summary.episode+" "+doc.name;
+			item.subtitle = "▶ ";
+			if(stream_summary.logged_start) item.subtitle += (stream_summary.duration?"":"at ")+pretty_seconds(stream_summary.progress)+(stream_summary.duration?" / "+pretty_seconds(stream_summary.duration):"")+", ";
+			item.alt = item.subtitle;
+			item.cmd = item.subtitle;
+			if(stream_summary.logged_start){
+				item.subtitle += "Stop streaming ( ⌘+Enter to mark as watched, ⌥+Enter to download instead of streaming )";
+				item.alt += 	 "Stop and download torrent ( ⌘+Enter to mark as watched, release ⌥ to just stop streaming )"
+				item.cmd += 	 "Stop and mark as watched ( release ⌘ to just stop streaming, ⌥+Enter to download instead )"
+			} else {
+				item.subtitle += "Abort streaming ( ⌘+Enter to mark as watched, ⌥+Enter to download instead of streaming )";
+				item.alt += 	 "Abort and download torrent ( ⌘+Enter to mark as watched, release ⌥ to just abort streaming )"
+				item.cmd += 	 "Abort and mark as watched ( release ⌘ to just abort streaming, ⌥+Enter to download instead )"
 			}
-			else{
-				item.title = "You are up to date with this show";
-				if(doc.last_watched){
-					item.subtitle = "up to s"+leading_zero(doc.last_watched.season)+"e"+leading_zero(doc.last_watched.episode);
-				} else {
-					item.subtitle = "but this show hasn't ended yet"
-				}
+		} else {
+			if(episode){
+				//get magnet
+				callup();
+				get_magnet(doc, episode, (function (callback, episode, doc, magnet) {
+					if(episode.progress && episode.progress>30){
+						if(magnet.piratebay){
+							item.title = "Resume watching "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
+							item.subtitle = "You stopped at "+percent_progress(episode)+"% ( ⌘+Enter to watch from the beginning, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
+							item.cmd = "Watch from the beginning ( release ⌘ to resume streaming at "+percent_progress(episode)+"%, ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
+						}
+						else{
+							item.title = "You stopped at "+percent_progress(episode)+"% of "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" )
+							item.subtitle = "but this episode isn't available on piratebay anymore. Press Enter to mark as watched."
+							item.arg = "ws"+doc.id+" "+episode.season_number+" "+episode.episode_number+" "+doc.name;
+						}
+					} else {
+						item.title = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+						if(doc.last_watched)
+							item.title = "Up next: "+item.title;
+						else
+							item.title = "Latest episode: "+item.title;
+						if(magnet && magnet.piratebay){
+							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
+						} else {
+							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1)
+								item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
+							else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 25) == 1) // TODO this case is true even when the episode is totally not out soon
+								item.subtitle = "This episode is airing today, wait a little for the torrent...";
+							else
+								item.subtitle = "Not available on piratebay";
+							item.valid="NO";
+						}
+					}
+					if(magnet.piratebay){
+						item.arg = "m"+doc.id+" "+episode.season_number+" "+episode.episode_number+" "+(episode.progress || 0)+" "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
+						item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
+					}
+					callback();
+				}).bind(undefined, calldown, episode, doc))
+			} else {
+				console.log("found nothing to watch for "+doc.name);
 				item.valid="NO";
+				if(doc.status == "Ended"){
+					item.title = "You have finished this show. Congratulation ;-)";
+					item.subtitle = "Press Enter to browse past episodes";
+					item.autocomplete = doc.name+" s";
+				}
+				else{
+					item.title = "You are up to date with this show";
+					item.subtitle = "Following episode has yet to be revealed";
+				}
 			}
 		}
 
+
 		//next out
-		find_next_release(doc, (function (callback, episode, doc) {
-			if(episode){
-				var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
-				var date = episode.air_date ? pretty_date(episode.air_date) : false;
-				var subtitle = (date ? episode.air_date : "")+" — "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name)) ? " — "+episode.name : "" );
-				date = date ? " "+date : "'s air date not set yet";
-				var item = w.add(first+" episode"+date, 2);
-				item.subtitle = subtitle;
-				item.valid="NO";
-			} else {
-				if(doc.status){
+		if(episode){
+			callup();
+			get_episode_after_episode(doc, episode, (function (calldown, next_episode, doc) {
+				if(next_episode) {
+					get_magnet(doc, next_episode, (function (calldown, episode, doc, magnet) {
+						var item = w.add("Following episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" ), 2);
+						if(magnet && magnet.piratebay){
+							item.subtitle = "Start streaming this episode ( ⌥+Enter to download torrent )"+", seeds: "+magnet.piratebay.seeders;
+							item.arg = "m"+doc.id+" "+episode.season_number+" "+episode.episode_number+" 0 "+doc.name+", "+formatted_episode_number(episode)+": "+episode.name
+							item.alt = "Download torrent ( release ⌥ to start streaming this episode )"+", seeds: "+magnet.piratebay.seeders;
+							if(is_streaming && stream_summary.showId == doc.id){
+								item.alt = "▶▍"+item.alt;
+								item.subtitle = "▶▍"+item.subtitle;
+							}
+						} else {
+							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1)
+								item.subtitle = "Will air "+pretty_date(episode.air_date)+".";
+							else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 25) == 1) // TODO this case is true even when the episode is totally not out soon
+								item.subtitle = "This episode is airing today, wait a little for the torrent...";
+							else
+								item.subtitle = "Not available on piratebay";
+							item.valid="NO";
+						}
+						calldown();
+					}).bind(undefined, calldown, next_episode, doc))
+				} else {
 					var item = w.add("---", 2);
 					item.valid="NO";
 					if(doc.status != "Ended")
-						item.subtitle = "Next episode's date not set yet";
+						item.subtitle = "Following episode has yet to be revealed";
 					else
 						item.subtitle = "This show has ended :-(";
+					calldown();
 				}
-			}
+			}).bind(undefined, calldown))
+		}
 
-			//description
-			var rating = Math.round(doc.vote_average/2)
-			var stars = rating_in_stars(doc.vote_average)
-			var year = doc.first_air_date.split("-")[0];
-			var genres = "";
-			for (var i = 0, l = doc.genres.length; i < l; i++) {
-				genres += (i>0?", ":"")+doc.genres[i].name;
-			};
-			make_preview_page(doc.id, doc.name, genres, rating, doc.status, year, doc.overview);
-			var item = w.add(doc.overview, 3);
-			item.subtitle = stars+" ("+year+") "+genres+" — "+doc.status;
-			item.arg = "l"+doc.id+" "+doc.name
-			item.largetype = doc.overview;
-			item.icon = "what.png";
+		//description
+		var rating = Math.round(doc.vote_average/2)
+		var stars = rating_in_stars(doc.vote_average)
+		var year = doc.first_air_date.split("-")[0];
+		var genres = "";
+		for (var i = 0, l = doc.genres.length; i < l; i++) {
+			genres += (i>0?", ":"")+doc.genres[i].name;
+		};
+		make_preview_page(doc.id, doc.name, genres, rating, doc.status, year, doc.overview);
+		var item = w.add(doc.overview, 3);
+		item.subtitle = stars+" ("+year+") "+genres+" — "+doc.status;
+		item.arg = "l"+doc.id+" "+doc.name
+		item.largetype = doc.overview;
+		item.icon = "what.png";
 
-			//favorite toggle
-			var item = w.add("", 4)
-			if(doc.fav==true){
-				item.title = "Remove "+doc.name+" from my favorites";
-				item.arg = "f0"+doc.id+" "+doc.name;
-			}
-			else{
-				item.title = "Add "+doc.name+" to my favorites";
-				item.arg = "f1"+doc.id+" "+doc.name;
-			}
-			item.subtitle = "Favorited TV Shows appear on the main screen with nifty results :-)"
-			item.icon = "love.png";
+		//favorite toggle
+		var item = w.add("", 4)
+		if(doc.fav==true){
+			item.title = "Remove "+doc.name+" from my favorites";
+			item.arg = "f0"+doc.id+" "+doc.name;
+		}
+		else{
+			item.title = "Add "+doc.name+" to my favorites";
+			item.arg = "f1"+doc.id+" "+doc.name;
+		}
+		item.subtitle = "Favorited TV Shows appear on the main screen with nifty results :-)"
+		item.icon = "love.png";
 
-			//watch specific episode
-			var item = w.add("Browse all episodes", 5)
-			item.subtitle = "Allows you to set where you're at in this show"
-			item.valid = "NO"
-			item.autocomplete = doc.name+" s"
+		//watch specific episode
+		var item = w.add("Browse all episodes", 5)
+		item.subtitle = "Allows you to set where you're at in this show"
+		item.valid = "NO"
+		item.autocomplete = doc.name+" s"
 
-			//mark as watched
-			var latest_matches_last = false;
-			if(doc.season && doc.last_watched){
-				console.log(doc.last_watched);
-				var latest_season = find_latest(doc.season)
-				if(latest_season && doc.season[latest_season.season_number].episode && doc.last_watched.season == latest_season.season_number) {
-					var latest_ep = find_latest(doc.season[latest_season.season_number].episode);
-					if(latest_ep && latest_ep.episode_number == doc.last_watched.episode){
-						latest_matches_last = true;
-					}
-				}
-			}
-			if(!latest_matches_last){
+		//mark as watched
+		callup();
+		find_latest_episode_of_show(doc, (function (calldown, episode, doc) {
+			if(!doc.last_watched || !(doc.last_watched.season == episode.season_number && doc.last_watched.episode == episode.episode_number)){
 				var item = w.add("Mark this show as watched", 6)
 				item.subtitle = "This way you'll get a better display of what's up next for you"
 				item.arg = "wf"+doc.id+" "+doc.name;
 			}
+			calldown();
+		}).bind(undefined, calldown))
 
-
-			callback();
-		}).bind(undefined, calldown));
+		calldown();
 	}).bind(undefined, callup, calldown));
 }
 
@@ -711,6 +716,11 @@ function try_to_output(){
 ///////////////////////
 //  INTERFACE UTILS  //
 ///////////////////////
+
+function pretty_seconds (seconds){
+	if(seconds<=3600) return leading_zero(Math.floor(seconds/60))+":"+leading_zero(Math.floor(seconds%60));
+	else return leading_zero(Math.floor(seconds/3600))+":"+leading_zero(Math.floor((seconds%3600)/60))+":"+leading_zero(Math.floor((seconds%3600)%60));
+}
 
 function good_enough_show (show) {
 	return (show.name && (!show.first_air_date || show.first_air_date.split("-")[0]>1985) && show.popularity>0.001 && show.poster_path);
@@ -841,18 +851,18 @@ function pretty_date (date) {
 
 function find_latest(array) {
     var latest;
-    var now = Date.now();
+    // var now = Date.now();
     for (var i = (array.isArray ? array.length : Object.keys(array).length) - 1; i >= 0; i--) {
         var index = array.isArray ? i : Object.keys(array)[i]
         //avoid season/episode 0 (usually "specials") being the main thing
-        if (array[index].season_number == 0 || array[index].season_number == undefined || array[index].season_number == "undefined" || array[index].episode_number == 0 || array[index].episode_number == undefined || array[index].episode_number == "undefined") continue;
+        if (array[index].season_number == 0 || array[index].episode_number == 0) continue;
         //initialize with any
         if (!latest) {
-            if (array[index].air_date && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
+            if (array[index].air_date && check_time_with(date_from_tmdb_format(array[index].air_date), 0) == -1) latest = array[index];
             continue;
         }
         //if "air_date" is defined for array[index] and is greater than that of latest (or latest's is undefined) but still smaller than Date.now()
-        if (array[index].air_date && (!latest.air_date || array[index].air_date.localeCompare(latest.air_date) > 0) && now > date_from_tmdb_format(array[index].air_date)) latest = array[index];
+        if (array[index].air_date && (!latest.air_date || array[index].air_date.localeCompare(latest.air_date) > 0) && check_time_with(date_from_tmdb_format(array[index].air_date), 0) == -1) latest = array[index];
     };
     return (latest && latest.air_date) ? latest : false;
 }
@@ -918,15 +928,24 @@ function find_ep_to_watch(show, callback) {
             else get_specific_episode(show, parseInt(show.last_watched.season) + 1, 1, callback)
         }).bind(undefined, callback))
     } else {
+    	console.log(show.name+" has no last watched")
         find_latest_episode_of_show(show, callback);
     }
+}
+
+function get_episode_after_episode(show, prev_episode, callback) {
+	get_specific_episode(show, prev_episode.season_number, prev_episode.episode_number + 1, (function(callback, prev_episode, next_episode, show) {
+		if (next_episode) callback(next_episode, show)
+		else get_specific_episode(show, prev_episode.season_number + 1, 1, callback)
+	}).bind(undefined, callback, prev_episode))
 }
 
 function get_specific_season(show, season_number, callback) {
 	if(season_number){
 	    // everything taken care of for getting this season
-	    get_seasons(show, (function(callback, season_number, show) {
-	        if (show.season && show.season[season_number]) callback(show.season[season_number], show)
+	    if (show && show.season && show.season[season_number]) callback(show.season[season_number], show)
+	    else get_seasons(show, (function(callback, season_number, show) {
+	        if (show && show.season && show.season[season_number]) callback(show.season[season_number], show)
 	        else callback(false)
 	    }).bind(undefined, callback, season_number))
 	} else callback(false)
@@ -1012,8 +1031,10 @@ function update_doc_with_seasonInfo(doc, res, season_number) {
 function get_specific_episode(show, season_number, episode_number, callback) {
 	if(season_number && episode_number){
 	    // everything taken care of for getting this season
-	    get_seasons(show, (function(callback, season_number, episode_number, show) {
-	        get_episodes(show, season_number, (function(callback, season_number, episode_number, show) {
+	    if(show && show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
+	    else get_seasons(show, (function(callback, season_number, episode_number, show) {
+	    	if(show && show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
+	        else get_episodes(show, season_number, (function(callback, season_number, episode_number, show) {
 	            if (show.season && show.season[season_number] && show.season[season_number].episode && show.season[season_number].episode[episode_number]) callback(show.season[season_number].episode[episode_number], show)
 	            else callback(false, show)
 	        }).bind(undefined, callback, season_number, episode_number))
@@ -1139,21 +1160,45 @@ function search_on_mdb (query, callback) {
 
 					// update shows with info contained in this query
 					if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-					for (var i = 0, l = res.results.length; i < l; i++) {
-						if(good_enough_show(res.results[i])){
-							db.shows.update({
-								id: parseInt(res.results[i].id)
-							}, { $set: {
-								name: res.results[i].name,
-								id: parseInt(res.results[i].id),
-								poster_path: res.results[i].poster_path,
-								first_air_date: res.results[i].first_air_date,
-								vote_average: res.results[i].vote_average,
-								popularity: res.results[i].popularity
-							} }, { upsert: true });
-						}
-						if(res.results[i].poster_path) delayed_images.push({"id": parseInt(res.results[i].id), "path": res.results[i].poster_path});
-					};
+
+					if(query=='miscTopRatedTvs'){
+						console.log("query was miscTopRatedTvs");
+						// remove previous "top" results before adding the new ones
+						db.shows.update({ top: { $exists: true } }, { $unset: { top: true } }, {}, function(){
+							for (var i = 0, l = res.results.length; i < l; i++) {
+								if(good_enough_show(res.results[i])){
+									db.shows.update({
+										id: parseInt(res.results[i].id)
+									}, { $set: {
+										name: res.results[i].name,
+										id: parseInt(res.results[i].id),
+										poster_path: res.results[i].poster_path,
+										first_air_date: res.results[i].first_air_date,
+										vote_average: res.results[i].vote_average,
+										popularity: res.results[i].popularity,
+										top: i+1
+									} }, { upsert: true });
+								}
+								if(res.results[i].poster_path) delayed_images.push({"id": parseInt(res.results[i].id), "path": res.results[i].poster_path});
+							}
+						})
+					} else {
+						for (var i = 0, l = res.results.length; i < l; i++) {
+							if(good_enough_show(res.results[i])){
+								db.shows.update({
+									id: parseInt(res.results[i].id)
+								}, { $set: {
+									name: res.results[i].name,
+									id: parseInt(res.results[i].id),
+									poster_path: res.results[i].poster_path,
+									first_air_date: res.results[i].first_air_date,
+									vote_average: res.results[i].vote_average,
+									popularity: res.results[i].popularity
+								} }, { upsert: true });
+							}
+							if(res.results[i].poster_path) delayed_images.push({"id": parseInt(res.results[i].id), "path": res.results[i].poster_path});
+						};
+					}
 
 
 
@@ -1318,7 +1363,7 @@ function crawl_piratebay_html (html) {
 			"seeders": $(this).find('td[align="right"]').first().text(),
 			"leechers": $(this).find('td[align="right"]').next().text(),
 			"link": $(this).find('div.detName a').attr('href'),
-			"magnetLink": $(this).find('a[title="Download this torrent using magnet"]').attr('href'),
+			"magnetLink": $(this).find('a[title="Download this torrent using magnet"]').attr('href')
 			// "category": {
 			// 	"id": $(this).find('center a').first().attr('href').match(/\/browse\/(\d+)/)[1],
 			// 	"name": $(this).find('center a').first().text(),
@@ -1454,11 +1499,15 @@ function alfred_xml (bundleid) {
 
 		var return_str = "<?xml version=\"1.0\"?><items>"+this.xml+"\n</items>";
 
+		this.zero();
+
+		return return_str;
+	}
+
+	this.zero = function () {
 		this.xml = "";
 		this.results = [];
 		this.order = [];
-
-		return return_str;
 	}
 }
 
@@ -1492,9 +1541,15 @@ function post_processing () {
 		if(docs){
 			for (var i = 0, l = docs.length; i < l; i++) {
 				dontLeave++;
-				refresh_show(docs[i], function () { dontLeave--; });
+				refresh_show(docs[i], function () { dontLeave++; }, function () { dontLeave--; });
 			};
 		}
+		dontLeave--;
+	});
+
+	// refresh top shows
+	dontLeave++;
+	search_on_mdb("miscTopRatedTvs", function (results) {
 		dontLeave--;
 	});
 
@@ -1593,12 +1648,20 @@ fs.removeRecursive = function(path, cb) {
     });
 };
 
-function refresh_show(show, callback){
-	get_seasons(show, (function (callback, show) {
-		get_episodes(show, find_latest(show.season).season_number, (function (callback, show) {
-			get_magnets_for_season(show, find_latest(show.season).season_number, callback);
-		}).bind(undefined, callback));
-	}).bind(undefined, callback));
+function refresh_show(show, callup, calldown){
+	get_seasons(show, (function (callup, calldown, show) {
+		get_episodes(show, find_latest(show.season).season_number, (function (callup, calldown, show) {
+			get_magnets_for_season(show, find_latest(show.season).season_number, (function (callup, calldown, show) {
+				find_ep_to_watch(show, (function (callup, calldown, episode, show) {
+					callup();
+					get_episode_after_episode(show, episode, (function (callup, calldown, episode, show) {
+						get_magnet(show, episode, calldown);
+					}).bind(undefined, callup, calldown))
+					get_magnet(show, episode, calldown);
+				}).bind(undefined, callup, calldown));
+			}).bind(undefined, callup, calldown));
+		}).bind(undefined, callup, calldown));
+	}).bind(undefined, callup, calldown));
 }
 
 function dl_image (img_name, url) {
