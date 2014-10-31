@@ -23,9 +23,9 @@ function start_server {
 }
 function isthismydad {
 	parent=$(ps -p ${1:-$$} -o ppid=)
-	if [ "$parent" = "$2" ]; then
+	if [ $parent -eq $2 ]; then
 		echo 0
-	elif [ "$parent" -eq 0 ]; then
+	elif [ $parent -eq 0 ]; then
 		echo 1
 	else
 		echo $(isthismydad $parent $2)
