@@ -261,7 +261,7 @@ function search_for_show (query) {
 					// notification because this might take some time
 					console.log("notify");
 					if(!exec) exec = require('child_process').exec;
-					exec(("/usr/bin/terminal-notifier -title \""+(doc.name || "New TV show")+"\" -message \"Fetching data, might take a sec...\""+(doc.id?" -contentImage \""+imgs_folder+"/"+doc.id+".jpg\"":"")+" &"), function(){});
+					exec(("/usr/bin/terminal-notifier -title \""+doc.name+"\" -message \"Fetching data, might take a sec...\" -contentImage \""+imgs_folder+"/"+doc.id+".jpg\" &"), function(){});
 				}
 				if(corrected_query)
 					browse(doc, season, episode, one_more_thing_to_do, try_to_output);
