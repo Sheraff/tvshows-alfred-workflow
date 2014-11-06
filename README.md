@@ -1,5 +1,6 @@
 TV Shows manager (Beta version) [download link](https://github.com/Sheraff/tvshows-alfred-workflow/raw/master/TV%20Show%20Manager.alfredworkflow "TV Shows manager.alfredworkflow")
 =======================
+[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/Sheraff/tvshows-alfred-workflow?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 Stream your favorite shows right from [Alfred](http://www.alfredapp.com/ "Alfred App official website"). Remember which episode you’re at (and where you stopped in it), know if a new episode is out, download for later...
 
