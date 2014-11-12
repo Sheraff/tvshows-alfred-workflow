@@ -40,6 +40,7 @@ If you wish to receive notifications to keep you informed of what might be happe
 ### 2. STREAMING
  - kill player before I kill peerflix
  - duration 0 case gives Infinity progress
+ - queue up next episode with secondary instance of peerflix
 
 ### 3. INTERFACE
  - read user prefs from file
