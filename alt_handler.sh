@@ -44,6 +44,29 @@ function findmyson {
 		fi
 	done
 }
+function killpeerflixandplayer {
+	# find and kill any instance of peerflix & player we're responsible for
+	if [[ -f ${PLAYER_PID} ]] && kill -0 $(cat "${PLAYER_PID}"); then
+		kill -9 $(cat "${PLAYER_PID}")
+		while kill -0 $(cat "${PLAYER_PID}"); do :; done
+		rm "${PLAYER_PID}"
+	fi
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+		# find player instance attached to the peerflix instance
+		player_pid_nb=$(findmyson $(cat "${PEERFLIX_PID}"))
+
+		# send kill signals
+		if [[ $player_pid_nb -gt 0 ]]; then kill -9 $player_pid_nb; fi
+		kill -9 $(cat "${PEERFLIX_PID}")
+
+		# wait for killing to be over
+		if [[ $player_pid_nb -gt 0 ]]; then while kill -0 $player_pid_nb; do :; done; fi
+		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
+
+		# remove PID file
+		rm "${PEERFLIX_PID}"
+	fi
+}
 
 # case "l" (originally) for large-type (default)
 if [[ $case_letter == "l" ]] ; then
@@ -67,23 +90,7 @@ elif [[ $case_letter == "c" ]] ; then
 	until magnet=$(curl 127.0.0.1:8374 -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	open -g "$magnet"
 
-	# find and kill any instance of peerflix & player we're responsible for
-	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
-
-		# find VLC instance attached to the peerflix instance
-		PLAYER_PID=$(findmyson $(cat "${PEERFLIX_PID}"))
-
-		# send kill signals
-		if [[ $PLAYER_PID -gt 0 ]]; then kill -9 $PLAYER_PID; fi
-		kill -9 $(cat "${PEERFLIX_PID}")
-
-		# wait for killing to be over
-		if [[ $PLAYER_PID -gt 0 ]]; then while kill -0 $PLAYER_PID; do :; done; fi
-		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
-
-		# remove PID file
-		rm "${PEERFLIX_PID}"
-	fi
+	killpeerflixandplayer
 
 	until out=$(curl 127.0.0.1:8374 -s -d "mark_watched=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 

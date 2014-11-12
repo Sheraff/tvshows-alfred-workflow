@@ -5,6 +5,7 @@ bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
 data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 PEERFLIX_PID="${cache}/peerflix.pid"
+PLAYER_PID="${cache}/player.pid"
 NODE_PID="${cache}/node.pid"
 init=$(date +%s);
 
@@ -44,6 +45,29 @@ function findmyson {
 		fi
 	done
 }
+function killpeerflixandplayer {
+	# find and kill any instance of peerflix & player we're responsible for
+	if [[ -f ${PLAYER_PID} ]] && kill -0 $(cat "${PLAYER_PID}"); then
+		kill -9 $(cat "${PLAYER_PID}")
+		while kill -0 $(cat "${PLAYER_PID}"); do :; done
+		rm "${PLAYER_PID}"
+	fi
+	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+		# find player instance attached to the peerflix instance
+		player_pid_nb=$(findmyson $(cat "${PEERFLIX_PID}"))
+
+		# send kill signals
+		if [[ $player_pid_nb -gt 0 ]]; then kill -9 $player_pid_nb; fi
+		kill -9 $(cat "${PEERFLIX_PID}")
+
+		# wait for killing to be over
+		if [[ $player_pid_nb -gt 0 ]]; then while kill -0 $player_pid_nb; do :; done; fi
+		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
+
+		# remove PID file
+		rm "${PEERFLIX_PID}"
+	fi
+}
 
 
 # case "l" (originally) for large-type
@@ -62,23 +86,7 @@ elif [[ $case_letter == "f" ]] ; then
 
 # case "c" for current
 elif [[ $case_letter == "c" ]] ; then
-	# find and kill any instance of peerflix & player we're responsible for
-	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
-
-		# find VLC instance attached to the peerflix instance
-		PLAYER_PID=$(findmyson $(cat "${PEERFLIX_PID}"))
-
-		# send kill signals
-		if [[ $PLAYER_PID -gt 0 ]]; then kill -9 $PLAYER_PID; fi
-		kill -9 $(cat "${PEERFLIX_PID}")
-
-		# wait for killing to be over
-		if [[ $PLAYER_PID -gt 0 ]]; then while kill -0 $PLAYER_PID; do :; done; fi
-		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
-
-		# remove PID file
-		rm "${PEERFLIX_PID}"
-	fi
+	killpeerflixandplayer
 
 
 # case "w" for watched
@@ -101,24 +109,8 @@ elif [[ $case_letter == "w" ]] ; then
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
 	start_server
-	# find and kill any instance of peerflix & player we're responsible for
-	if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
+	killpeerflixandplayer
 
-		# find VLC instance attached to the peerflix instance
-		PLAYER_PID=$(findmyson $(cat "${PEERFLIX_PID}"))
-
-		# send kill signals
-		if [[ $PLAYER_PID -gt 0 ]]; then kill -9 $PLAYER_PID; fi
-		kill -9 $(cat "${PEERFLIX_PID}")
-
-		# wait for killing to be over
-		if [[ $PLAYER_PID -gt 0 ]]; then while kill -0 $PLAYER_PID; do :; done; fi
-		while kill -0 $(cat "${PEERFLIX_PID}"); do :; done
-
-		# remove PID file
-		rm "${PEERFLIX_PID}"
-	fi
-
-	echo "$case_letter$QUERY"
+	printf "$case_letter$QUERY"
 
 fi
