@@ -41,7 +41,7 @@ var summaries_folder = w.data+"/summaries";
 
 // streaming
 var peerflix_pid = w.cache+"/peerflix.pid";
-var vlc_pid = w.cache+"/vlc.pid";
+var secondary_peerflix_pid = w.cache+"/secondary_peerflix.pid";
 var is_streaming = false;
 var delay_before_post_process = 120000;
 var vlc_tcp = ['127.0.0.1','8376'];
@@ -79,20 +79,27 @@ http.createServer(function (req, res) {
 
 			if(post['stream']){
 				handle_stream(post['stream'], post['show_id'], post['player']);
-				post_process_while_streaming = setTimeout(post_processing, delay_before_post_process);
+				http_response.end('ok');
 			}
 
-			else if(post['fav'])
+			else if(post['fav']){
 				toggle_fav(post['fav'], post['bool'], true);
+				http_response.end('ok');
+			}
 
-			else if(post['mark_watched'])
+			else if(post['mark_watched']){
 				if(post['season'] && post['episode'])
-					mark_as_watched(post['mark_watched'], post['season'], post['episode'], true);
+					mark_as_watched(post['mark_watched'], post['season'], post['episode']);
 				else
-					mark_as_watched(post['mark_watched'], true);
+					mark_as_watched(post['mark_watched']);
+				http_response.end('ok');
+			}
 
 			else if(post['magnet_id'])
-				respond_with_magnet(post['magnet_id'], post['season'], post['episode']);
+				respond_with_magnet(post['magnet_id'], post['season'], post['episode'], http_response.end.bind(http_response));
+
+			else if(post['next_magnet_id'])
+				respond_with_next_magnet(post['next_magnet_id'], post['season'], post['episode'], http_response.end.bind(http_response));
 
 			else
 				use_query(post['query']);
@@ -101,7 +108,6 @@ http.createServer(function (req, res) {
 	} else {
 		http_response.end('pong');
 	}
-
 	timeout = setTimeout(exit_server, server_life);
 }).listen(host[1], host[0]);
 initialize();
@@ -138,7 +144,7 @@ function finish_initializing () {
 function use_query (query) {
 	console.log("use_query: "+query);
 	w.zero();
-	query = query.trimLeft().replace(/\s{2,}/g, " ");
+	if(query) query = query.trimLeft().replace(/\s{2,}/g, " ").replace(/\($/g, "");
 	if(query && query!="miscTopRatedTvs")
 		search_for_show(query)
 	else
@@ -158,8 +164,12 @@ function homepage() {
 			item.subtitle = (doc.fav?"♥ ":"")
 			item.subtitle += (stream_summary.logged_start?"("+(stream_summary.duration?"":"at ")+pretty_seconds(stream_summary.progress)+(stream_summary.duration?" / "+pretty_seconds(stream_summary.duration):"")+") ":"");
 			item.subtitle += formatted_episode_number(episode) + (pretty_string(episode.name)?" — "+episode.name:"");
-			item.autocomplete = doc.name+" ";
 			item.valid = "NO";
+			one_more_thing_to_do();
+			db.shows.find({ name: stream_summary.showName }, (function (doc, item, err, docs) {
+				item.autocomplete = doc.name+(docs.length>1 && doc.first_air_date ? " ("+doc.first_air_date.split("-")[0]+") " : " ");
+				try_to_output();
+			}).bind(undefined, doc, item));
 			fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
 				item.icon = exists?name:"icon.png";
 				try_to_output();
@@ -210,7 +220,7 @@ function homepage2 (top_show_id) {
 				for (var i = top_docs.length - 1; i >= 0; i--) {
 					if(good_enough_show(top_docs[i]) && (!fav_docs || !is_doc_in_docs(top_docs[i].id, fav_docs)) && (!is_streaming || stream_summary.showId != top_docs[i].id) && top_docs[i].id != top_show_id){
 						one_more_thing_to_do();
-						simple_output(top_docs[i], try_to_output);
+						simple_output(top_docs[i], one_more_thing_to_do, try_to_output);
 					}
 				};
 				try_to_output();
@@ -219,7 +229,7 @@ function homepage2 (top_show_id) {
 					for (var i = 0, l = results.length; i < l; i++) {
 						if(good_enough_show(results[i]) && (!fav_docs || !is_doc_in_docs(results[i].id, fav_docs)) && (!is_streaming || stream_summary.showId != results[i].id) && results[i].id != top_show_id){
 							one_more_thing_to_do();
-							simple_output(results[i], try_to_output);
+							simple_output(results[i], one_more_thing_to_do, try_to_output);
 						}
 					}
 					try_to_output();
@@ -253,15 +263,27 @@ function search_for_show (query) {
 	// maybe we have that exact show in store already
 	if(query.charAt(query.length-1)===" " && query.trim().length>0){
 		if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-		var re = new RegExp("^"+query.trim()+"$", "i");
-		db.shows.findOne({ name: { $regex: re } }, function (err, doc) {
-			if(doc){
+		var search = {};
+		var year_match = query.trim().match(/ \(([0-9]{4})\)$/);
+		if(year_match){
+			console.log("with year precision");
+			search.$and = [
+				{ "name": { $regex: new RegExp("^"+query.trim().substring(0, year_match.index)+"$", "i") } },
+				{ "first_air_date": { $regex: new RegExp("^"+year_match[1]) } }
+			];
+		} else {
+			search.name = { $regex: new RegExp("^"+query.trim()+"$", "i")};
+		}
+
+		db.shows.find(search, function (err, docs) {
+			if(docs.length == 1){
+				doc = docs[0];
 				doc.comes_from_db_already = true;
 				if(!doc.timestamp || !doc.season || check_time_with(doc.timestamp, show_expiration) == -1){
 					// notification because this might take some time
 					console.log("notify");
 					if(!exec) exec = require('child_process').exec;
-					exec(("/usr/bin/terminal-notifier -title \""+doc.name+"\" -message \"Fetching data, might take a sec...\" -contentImage \""+imgs_folder+"/"+doc.id+".jpg\" &"), function(){});
+					exec(("nohup /usr/bin/terminal-notifier -title \""+doc.name+"\" -message \"Fetching data, might take a sec...\" -contentImage \""+imgs_folder+"/"+doc.id+".jpg\" -sender com.runningwithcrayons.Alfred-2 >/dev/null 2>&1 &"), function(){});
 				}
 				if(corrected_query)
 					browse(doc, season, episode, one_more_thing_to_do, try_to_output);
@@ -284,12 +306,13 @@ function search_for_show2(corrected_query, season, episode, query){
 			no_result();
 
 		// is query a match for a show (exact match or only one result)
-		var only_one_good_show = false, good_shows_count = 0, exact_match = false;
+		var only_one_good_show = false, good_shows_count = 0, exact_match = false, exact_match_count = 0;
 		var temp_q = query.trim();
 		for (var i = results.length - 1; i >= 0; i--) {
 			if(good_enough_show(results[i])){
 				if(temp_q==results[i].name){
 					exact_match = results[i];
+					exact_match_count++;
 				}
 				only_one_good_show = results[i];
 				good_shows_count++;
@@ -298,7 +321,7 @@ function search_for_show2(corrected_query, season, episode, query){
 		if(good_shows_count==0)
 			no_result();
 		else if(good_shows_count>1 || (only_one_good_show && simplify_str(temp_q)!=simplify_str(only_one_good_show.name))) only_one_good_show = false;
-
+		if(exact_match_count>1) exact_match = false;
 
 		//single result: complete info
 		if((only_one_good_show || exact_match ) && (query.charAt(query.length-1)===" ") || corrected_query){
@@ -314,13 +337,20 @@ function search_for_show2(corrected_query, season, episode, query){
 			for (var i = 0, l = results.length; i < l; i++) {
 				if(good_enough_show(results[i])){
 					one_more_thing_to_do();
-					db.shows.findOne({ id: parseInt(results[i].id) }, (function (result, index, callup, calldown, err, doc) {
-						if(!doc || (!doc.last_watched && !doc.fav)){
-							simple_output(result, calldown);
-						} else {
-							complete_oneline_output(doc, callup, calldown, index);
+					var appearsTwice = false;
+					for (var j = results.length - 1; j >= 0; j--) {
+						if(i!=j && simplify_str(results[j].name) == simplify_str(results[i].name)){
+							appearsTwice = true;
+							break;
 						}
-					}).bind(undefined, results[i], i, one_more_thing_to_do, try_to_output));
+					};
+					db.shows.findOne({ id: parseInt(results[i].id) }, (function (result, index, callup, calldown, preciseDate, err, doc) {
+						if(!doc || (!doc.last_watched && !doc.fav)){
+							simple_output(result, callup, calldown, preciseDate);
+						} else {
+							complete_oneline_output(doc, callup, calldown, index, preciseDate);
+						}
+					}).bind(undefined, results[i], i, one_more_thing_to_do, try_to_output, appearsTwice));
 				}
 			}
 		}
@@ -333,18 +363,26 @@ function no_result(){
 	try_to_output();
 }
 
-function simple_output(result, callback) {
+function simple_output(result, callup, callback, preciseDate) {
 		var item = w.add(result.name);
-		item.autocomplete = result.name+" ";
 		item.valid = "NO";
 		// item.subtitle = rating_in_stars(result.vote_average); // +" — "+result.name+(result.first_air_date?" ("+(result.first_air_date.split("-")[0])+")":"");
+		if(preciseDate === undefined){
+			callup();
+			db.shows.find({ name: result.name }, (function (callback, result, err, docs) {
+				item.autocomplete = result.name+(docs.length>1 && result.first_air_date ? " ("+result.first_air_date.split("-")[0]+") " : " ");
+				callback();
+			}).bind(undefined, callback, result));
+		} else {
+			item.autocomplete = result.name+(preciseDate && result.first_air_date ? " ("+result.first_air_date.split("-")[0]+") " : " ");
+		}
 		fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
 			item.icon = exists?name:"icon.png";
 			callback();
 		}).bind(undefined, callback, item, imgs_folder+"/"+result.id+".jpg"));
 }
 
-function complete_oneline_output (result, callup, calldown, order_index) {
+function complete_oneline_output (result, callup, calldown, order_index, preciseDate) {
 
 	//look for extra things to display
 	find_ep_to_watch(result, (function (callback, doc, order_index, episode) {
@@ -371,11 +409,11 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 							}
 						} else {
 							var new_ep_flag = false;
-							if(doc.season && doc.season[""+episode.season_number+""]) {
+							if(doc.last_watched && doc.season && doc.season[""+episode.season_number+""]) {
 								var latest_season = find_latest(doc.season);
 								if( latest_season.season_number == episode.season_number && doc.season[""+episode.season_number+""].episode && doc.season[""+episode.season_number+""].episode[""+episode.episode_number+""] ){
 									var latest_episode = find_latest(doc.season[""+episode.season_number+""].episode);
-									if(latest_episode.episode_number == episode.episode_number){
+									if(latest_episode.episode_number == episode.episode_number && doc.last_watched.timestamp < date_from_tmdb_format(episode.air_date)){
 										new_ep_flag = true;
 									}
 								}
@@ -412,21 +450,29 @@ function complete_oneline_output (result, callup, calldown, order_index) {
 				callback(order_range+order_index, subtitle);
 			}).bind(undefined, callback, doc, order_index));
 		}
-	}).bind(undefined, (function (callup, calldown, result, order_range, subtitle) {
+	}).bind(undefined, (function (callup, calldown, result, preciseDate, order_range, subtitle) {
 		//add result
 		var item = w.add(result.name, order_range);
 		if(result.fav) subtitle = "♥ "+subtitle;
 		item.subtitle = subtitle;
-		item.autocomplete = result.name+" ";
 		item.valid = "NO";
 		item.uid = "result.name";
+		if(preciseDate === undefined){
+			callup();
+			db.shows.find({ name: result.name }, (function (callback, result, err, docs) {
+				item.autocomplete = result.name+(docs.length>1 && result.first_air_date ? " ("+result.first_air_date.split("-")[0]+") " : " ");
+				callback();
+			}).bind(undefined, calldown, result));
+		} else {
+			item.autocomplete = result.name+(preciseDate && result.first_air_date ? " ("+result.first_air_date.split("-")[0]+") " : " ");
+		}
 		callup();
 		fs.exists(imgs_folder+"/"+result.id+".jpg", (function (callback, item, name, exists) {
 			item.icon = exists?name:"icon.png";
 			callback();
 		}).bind(undefined, calldown, item, imgs_folder+"/"+result.id+".jpg"));
 		calldown();
-	}).bind(undefined, callup, calldown, result), result, order_index))
+	}).bind(undefined, callup, calldown, result, preciseDate), result, order_index))
 }
 
 function browse (result, season, episode, callup, calldown) {
@@ -1252,7 +1298,7 @@ function get_magnet (show, episode, callback) {
 
 				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
 				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-				var re = new RegExp(regexed_name+"[. ]?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
+				var re = new RegExp(regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
 
 				var found = false;
 				for (var i = 0, l = results.length; i < l; i++) {
@@ -1554,6 +1600,7 @@ function alfred_xml (bundleid) {
 function exit_server () {
 	if(!is_streaming){
 		post_processing();
+		kill_with_pid_file(secondary_peerflix_pid);
 
 		// exit (wait for all async processes to be done, stops trying if an http request comes in)
 		exitInterval = setInterval(function () {
@@ -1724,8 +1771,7 @@ function dl_image (img_name, url) {
 //  FAVORITE TOGGLE  //
 ///////////////////////
 
-function toggle_fav (id, bool, reply) {
-	if(reply) http_response.end('ok');
+function toggle_fav (id, bool) {
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
 	var fav = (bool==1||bool==true);
 	db.shows.update({ id: parseInt(id) }, { $set: { fav: fav } }, {}, (function (err, numReplaced) {
@@ -1738,58 +1784,79 @@ function toggle_fav (id, bool, reply) {
 //  RESPOND WITH MAGNET  //
 ///////////////////////////
 
-function respond_with_magnet (id, season, episode){
+function respond_with_next_magnet (id, season, episode, callback) {
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
-	db.shows.findOne({id: parseInt(id)}, (function (season, episode, err, show) {
+	db.shows.findOne({id: parseInt(id)}, (function (callback, season, episode, err, show) {
 		if(!show){
 			console.log("no show");
-			http_response.end(false);
-		}
-		else
-			get_specific_episode(show, parseInt(season), parseInt(episode), function (episode, show) {
+			callback(false);
+		} else get_specific_episode(show, parseInt(season), parseInt(episode), (function (callback, episode, show) {
+			if(!episode){
+				console.log("no episode")
+				callback(false);
+			} else get_episode_after_episode(show, episode, (function (callback, episode, show) {
 				if(!episode){
-					console.log("no episode")
-					http_response.end(false);
+					console.log("no episode after")
+					callback(false);
+				} else get_best_magnet(show, episode, (function (callback, show, episode, magnet) {
+					if(!magnet) callback(false)
+					else callback(show.id+" "+episode.season_number+" "+episode.episode_number+" "+magnet)
+				}).bind(undefined, callback, show, episode))
+			}).bind(undefined, callback))
+		}).bind(undefined, callback))
+	}).bind(undefined, callback, season, episode));
+}
+
+function respond_with_magnet (id, season, episode, callback){
+	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
+	db.shows.findOne({id: parseInt(id)}, (function (callback, season, episode, err, show) {
+		if(!show){
+			console.log("no show");
+			callback(false);
+		} else get_specific_episode(show, parseInt(season), parseInt(episode), (function (callback, episode, show) {
+			if(!episode){
+				console.log("no episode")
+				callback(false);
+			} else get_best_magnet (show, episode, callback)
+		}).bind(undefined, callback))
+	}).bind(undefined, callback, season, episode));
+}
+
+function get_best_magnet (show, episode, callback) {
+	get_magnet(show, episode, (function (callback, show, episode, magnet) {
+		search_piratebay(show.name+" "+episode.season_number+"x"+leading_zero(episode.episode_number), (function (callback, show, episode, results) {
+
+			var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
+			regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+			var re = new RegExp(regexed_name+"[. ]?"+episode.season_number+"x"+leading_zero(episode.episode_number), "i");
+
+			var found = false;
+			for (var i = 0, l = results.length; i < l; i++) {
+				var match = results[i].name.match(re);
+				if(match && match.length>0){
+					found = true;
+					break;
 				}
-				else{
-					get_magnet(show, episode, (function (show, episode, magnet) {
-						search_piratebay(show.name+" "+episode.season_number+"x"+leading_zero(episode.episode_number), (function (show, episode, results) {
+			};
 
-							var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
-							regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-							var re = new RegExp(regexed_name+"[. ]?"+episode.season_number+"x"+leading_zero(episode.episode_number), "i");
-
-							var found = false;
-							for (var i = 0, l = results.length; i < l; i++) {
-								var match = results[i].name.match(re);
-								if(match && match.length>0){
-									found = true;
-									break;
-								}
-							};
-
-							if(found && ((!magnet || !magnet.piratebay) || results[i].seeders > magnet.piratebay.seeders)){
-								magnet = {
-									"timestamp": Date.now(),
-									"piratebay": results[i]
-								}
-								console.log("found good SxEE magnet");
-							}
-
-							if(!magnet || !magnet.piratebay){
-								console.log("no magnet")
-								http_response.end(false);
-							}
-							else{
-								console.log("sending magnet "+magnet.piratebay.name);
-								http_response.end(magnet.piratebay.magnetLink);
-							}
-
-						}).bind(undefined, show, episode))
-					}).bind(undefined, show, episode))
+			if(found && ((!magnet || !magnet.piratebay) || results[i].seeders > magnet.piratebay.seeders)){
+				magnet = {
+					"timestamp": Date.now(),
+					"piratebay": results[i]
 				}
-			})
-	}).bind(undefined, season, episode));
+				console.log("found good SxEE magnet");
+			}
+
+			if(!magnet || !magnet.piratebay){
+				console.log("no magnet")
+				callback(false);
+			} else {
+				console.log("sending magnet "+magnet.piratebay.name);
+				callback(magnet.piratebay.magnetLink);
+			}
+
+		}).bind(undefined, callback, show, episode))
+	}).bind(undefined, callback, show, episode))
 }
 
 
@@ -1797,14 +1864,7 @@ function respond_with_magnet (id, season, episode){
 //  MARK AS WATCHED  //
 ///////////////////////
 
-function mark_as_watched (id, season, episode, reply) {
-	//allow for call as mark_as_watched(id, reply), meaning mark latest as watched
-	if(season!=undefined && !episode && !reply){
-		reply = season;
-		season = undefined;
-	}
-
-	if(reply) http_response.end('ok');
+function mark_as_watched (id, season, episode) {
 	if(!db.shows) db.shows = new Datastore({ filename: w.data+"/shows.db", autoload: true });
 
 	if(season && episode){
@@ -1850,7 +1910,7 @@ function mark_as_watched (id, season, episode, reply) {
 ///////////////////////
 
 function handle_stream (info, id, player){
-	http_response.end('ok');
+	post_process_while_streaming = setTimeout(post_processing, delay_before_post_process);
 	is_streaming = true;
 
 	// parse info
@@ -1867,6 +1927,9 @@ function handle_stream (info, id, player){
 	stream_summary.monitorCounter = 0;
 	stream_summary.logged_end = false;
 	stream_summary.logged_start = false;
+	fs.readFile(peerflix_pid, 'utf8', function (err, data) {
+		stream_summary.peerflix_pid = data;
+	});
 	console.log("streaming: "+stream_summary.showName+" s"+stream_summary.season+" e"+stream_summary.episode+", show id:"+id);
 
 	if(player=="mpv"){
@@ -2041,16 +2104,12 @@ function finish_streaming (){
 	is_streaming = false;
 
 	// kill sub processes and remove pid files
-	kill_with_pid_file(peerflix_pid);
-
-	console.log("finish");
+	kill_with_pid(stream_summary.peerflix_pid)
 
 	//check that we have all the data we need and log it to db
 	log_show_progress(stream_summary)
 
-	// TODO if it a few episodes in a row are watched, add to favorites
-
-	console.log('all done');
+	console.log("finished streaming");
 }
 
 function log_show_progress (stream_summary) {
@@ -2111,17 +2170,23 @@ function clean_watch_log_after (show_id, season_number, episode_number) {
 }
 
 function kill_with_pid_file(pid_file){
-	fs.readFile(pid_file, 'utf8', function (err, data) {
-		try {
-			process.kill(data, 'SIGINT');
-			console.log("... killed "+data);
-		} catch(e){
-			console.log("... "+data+" got killed before");
-		}
-		try {
+	fs.readFile(pid_file, 'utf8', (function (pid_file, err, data) {
+		kill_with_pid(data, (function (pid_file) {
 			fs.unlink(pid_file, function () {});
-		} catch(e){}
-	});
+		}).bind(undefined, pid_file));
+	}).bind(undefined, pid_file));
+}
+
+function kill_with_pid(pid, callback) {
+	try {
+		process.kill(pid, 'SIGINT');
+		console.log("... killed "+pid);
+	} catch(e){
+		console.log("... "+pid+" was dead already");
+	}
+	try {
+		if(callback) callback();
+	} catch(e){}
 }
 
 
