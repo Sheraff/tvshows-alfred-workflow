@@ -179,7 +179,7 @@ function homepage() {
 	} else {
 		one_more_thing_to_do();
 		db.shows.find({ "last_watched": { $exists: true } }).sort({ "last_watched.timestamp": -1 }).limit(1).exec(function (err, docs) {
-			if(docs){
+			if(docs && docs.length>0){
 				one_more_thing_to_do();
 				find_ep_to_watch(docs[0], function (episode, show) {
 					get_magnet(show, episode, (function (show, episode, magnet) {
@@ -395,15 +395,17 @@ function complete_oneline_output (result, callup, calldown, order_index, precise
 			} else if(doc.last_watched) {
 				if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == 1){
 					subtitle += "New episode "+pretty_date(episode.air_date)+": "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-					order_range = 200;
+					order_range = 300;
 					callback(order_range+days_until(episode.air_date), subtitle);
 				} else {
 					get_magnet(doc, episode, (function (callback, doc, subtitle, episode, order_index, magnet) {
 						var temp_sub = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(!magnet.piratebay){
-							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 25) == 1){
+							order_range = 100;
+							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 24) == 1){
 								temp_sub = "Up soon: "+temp_sub+" — This episode is airing today, wait a little for the torrent...";
-								order_range = 100;
+							} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 48) == 1){
+								temp_sub = "Up soon: "+temp_sub+" — This episode aired yesterday, wait a little for the torrent...";
 							} else {
 								temp_sub += " — Torrent unavailable on piratebay.";
 							}
@@ -425,12 +427,12 @@ function complete_oneline_output (result, callup, calldown, order_index, precise
 					}).bind(undefined, callback, doc, subtitle, episode, order_index))
 				}
 			} else if(doc.status && doc.status=="Ended") {
-				subtitle += "Ended";
-				order_range = 1000
+				subtitle += "Last episode (show has ended): "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
+				order_range = 200
 				callback(order_range+order_index, subtitle);
 			} else {
 				subtitle += "Latest episode: "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
-				order_range = 600;
+				order_range = 200;
 				callback(order_range+order_index, subtitle);
 			}
 		} else {
@@ -438,7 +440,7 @@ function complete_oneline_output (result, callup, calldown, order_index, precise
 				if(episode){
 					var first = ( episode.season_number == 1 && episode.episode_number == 1 ? "First" : "Next" );
 					var date = episode.air_date?pretty_date(episode.air_date):false;
-					order_range = 200;
+					order_range = 300;
 					if(date) subtitle += first+" episode "+date
 				} else if(doc.status && doc.status=="Ended") {
 					subtitle += "Ended";
@@ -766,7 +768,7 @@ function complete_output_2 (doc, callup, calldown){
 		//mark as watched
 		callup();
 		find_latest_episode_of_show(doc, (function (calldown, episode, doc) {
-			if(!doc.last_watched || !(doc.last_watched.season == episode.season_number && doc.last_watched.episode == episode.episode_number)){
+			if(!doc.last_watched || !(doc.last_watched.season == episode.season_number && doc.last_watched.episode == episode.episode_number && (!doc.last_watched.progress || doc.last_watched.progress/doc.last_watched.duration>percent_to_consider_watched))){
 				var item = w.add("Mark this show as watched", 6)
 				item.subtitle = "This way you'll get a better display of what's up next for you"
 				item.arg = "wf"+doc.id+" "+doc.name;
@@ -904,7 +906,7 @@ function pretty_date (date) {
 			if(next_week.getTime()>next_air_date.getTime()){
 				next_week.setDate(next_week.getDate() - 1);
 				next_ep_str = next_air_date.getDate()==next_week.getDate() ? "next" : "on";
-				next_ep_str += " "+(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][next_air_date.getDay()]);
+				next_ep_str += " "+(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][next_air_date.getDay()]);
 			} else {
 				if(now.getMonth()+1>=(next_air_date.getMonth())+12*(next_air_date.getFullYear()-now.getFullYear())){
 					var in_days = Math.floor((next_air_date.getTime()-now.getTime())/(24*60*60*1000));
@@ -1153,6 +1155,7 @@ function update_doc_with_tvInfo(doc, res) {
 	    doc["id"] = parseInt(res.id);
 	    doc["poster_path"] = res.poster_path;
 	    doc["first_air_date"] = res.first_air_date;
+	    doc["country"] = res.origin_country;
 	    doc["popularity"] = res.popularity;
 	    doc["timestamp"] = Date.now();
 	    doc["created_by"] = res.created_by;
@@ -1180,6 +1183,7 @@ function update_doc_with_tvInfo(doc, res) {
 	    setModifier.$set["id"] = parseInt(res.id);
 	    setModifier.$set["poster_path"] = res.poster_path;
 	    setModifier.$set["first_air_date"] = res.first_air_date;
+	    setModifier.$set["country"] = res.origin_country;
 	    setModifier.$set["popularity"] = res.popularity;
 	    setModifier.$set["timestamp"] = Date.now();
 	    setModifier.$set["created_by"] = res.created_by;
@@ -1255,6 +1259,7 @@ function search_on_mdb (query, callback) {
 										id: parseInt(res.results[i].id),
 										poster_path: res.results[i].poster_path,
 										first_air_date: res.results[i].first_air_date,
+										country: res.results[i].origin_country,
 										vote_average: res.results[i].vote_average,
 										popularity: res.results[i].popularity,
 										top: i+1
@@ -1273,6 +1278,7 @@ function search_on_mdb (query, callback) {
 									id: parseInt(res.results[i].id),
 									poster_path: res.results[i].poster_path,
 									first_air_date: res.results[i].first_air_date,
+									country: res.results[i].origin_country,
 									vote_average: res.results[i].vote_average,
 									popularity: res.results[i].popularity
 								} }, { upsert: true });
@@ -1620,7 +1626,7 @@ function post_processing () {
 	// refresh all favorite shows
 	dontLeave++;
 	db.shows.find({ fav: true }, function (err, docs) {
-		if(docs){
+		if(docs && docs.length>0){
 			for (var i = 0, l = docs.length; i < l; i++) {
 				dontLeave++;
 				refresh_show(docs[i], function () { dontLeave++; }, function () { dontLeave--; });

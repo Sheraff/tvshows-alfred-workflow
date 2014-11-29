@@ -24,7 +24,7 @@ if [[ -f ${SECONDARY_PEERFLIX_PID} ]] && kill -0 $(cat "${SECONDARY_PEERFLIX_PID
 fi
 
 # start downloading it
-nohup node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" --on-listening "./log_pre_dl_ep_host.sh $id $season $episode \"$magnet\"" &
+nohup node ./node_modules/peerflix/app.js "$magnet" --hostname 127.0.0.1 -q -f "${episodes}" --on-listening "./log_pre_dl_ep_host.sh $id $season $episode \"$magnet\"" &
 echo $! > "${SECONDARY_PEERFLIX_PID}"
 
 # actually kill previous secondary peerflix

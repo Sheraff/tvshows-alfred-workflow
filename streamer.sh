@@ -68,7 +68,6 @@ if [[ $case_letter == "m" ]] ; then
 	fi
 
 	if [[ $is_pre_loaded -eq 0 ]]; then
-		echo "$id $episode $season not preloaded" > debug.txt
 
 		# send notification
 		terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
@@ -83,10 +82,10 @@ if [[ $case_letter == "m" ]] ; then
 
 		# start peerflix
 		if hash mpv 2> /dev/null; then
-			nohup node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" --on-downloaded "nohup ./pre_dl_ep.sh $id $season $episode" -k -- --start=$progress --input-unix-socket=socket.io --title="\"$title\"" &
+			nohup node ./node_modules/peerflix/app.js "$magnet" --hostname 127.0.0.1 -q -f "${episodes}" --on-downloaded "nohup ./pre_dl_ep.sh $id $season $episode" -k -- --start=$progress --input-unix-socket=socket.io --title="\"$title\"" &
 			player="mpv"
 		else
-			nohup node ./node_modules/peerflix/app.js "$magnet" -q -f "${episodes}" --on-downloaded "nohup ./pre_dl_ep.sh $id $season $episode" -v -- -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "\"$title\"" --play-and-exit &
+			nohup node ./node_modules/peerflix/app.js "$magnet" --hostname 127.0.0.1 -q -f "${episodes}" --on-downloaded "nohup ./pre_dl_ep.sh $id $season $episode" -v -- -I macosx --start-time $progress --extraintf oldrc --extraintf rc --rc-host http://127.0.0.1:8376 --meta-title "\"$title\"" --play-and-exit &
 			player="VLC"
 		fi
 		echo $! > "${PEERFLIX_PID}"
