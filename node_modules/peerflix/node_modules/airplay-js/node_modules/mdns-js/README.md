@@ -2,10 +2,12 @@ mDNS-js
 ==========
 
 Pure JavaScript/NodeJS mDNS discovery implementation.
+It's definitely not a full implementation at the current
+state and it will NOT work in the browser. 
 
-A lot of the functionality is copied from 
+The starting inspiration came from
 https://github.com/GoogleChrome/chrome-app-samples/tree/master/mdns-browser
-but adapted for node.
+but adapted for node. It's not much left of that now though.
 
 Install by
 
@@ -27,7 +29,7 @@ example
 ```javascript
 var mdns = require('mdns-js');
 
-var browser = new mdns.createBrowser();
+var browser = mdns.createBrowser();
 
 browser.on('ready', function () {
     browser.discover(); 
@@ -46,11 +48,17 @@ This library is using the [debug](https://github.com/visionmedia/debug)
 module from TJ Holowaychuk and can be used like this.
 
 ```bash
-DEBUG=mdns* node examples/simple.js
+DEBUG=mdns:* node examples/simple.js
 ```
 
-This will spit out a lot of information that might be useful.
+This will spit out LOTS of information that might be useful.
+If you have some issues with something where you might want
+to communicate the contents of a packet (ie create an issue on github)
+you could limit the debug information to just that.
 
+```bash
+DEBUG=mdns:browser:packet node examples/simple.js
+```
 
 Contributing
 ------------
@@ -59,14 +67,22 @@ Pull-request will be gladly accepted.
 If possible any api should be as close match to the api of node-mdns but
 be pragmatic. Look at issue #5.
 
+Please run any existing tests with
+
+    npm test
+
+and preferably add more tests.
+
+
 Before creating a pull-request please run 
 
     npm run lint 
 
-on any changed code.
-There is a .jshintrc file included in the project, use it, and don't 
-be offended by it.
+This will run jshint as well as jscs that will do some basic syntax
+and code style checks.
+Fix any issues befor committing and creating a pull-request.
 
+Look at the .jshintrc and .jscs.json for the details.
 
 
 License
