@@ -41,7 +41,7 @@ var summaries_folder = w.data+"/summaries";
 
 // streaming
 var peerflix_pid = w.cache+"/peerflix.pid";
-var secondary_peerflix_pid = w.cache+"/secondary_peerflix.pid";
+var secondary_peerflix_pid = w.cache+"/next_ep_host.txt";
 var is_streaming = false;
 var delay_before_post_process = 120000;
 var vlc_tcp = ['127.0.0.1','8376'];
@@ -2056,7 +2056,6 @@ function handle_stream (info, id, player){
 }
 
 function monitor_mpv (){
-	console.log("monitor mpv");
 	if(stream_summary.reopen == undefined) stream_summary.reopen = true;
 	if(stream_summary.can_log == undefined) stream_summary.can_log = true;
 
@@ -2288,6 +2287,7 @@ function clean_watch_log_after (show_id, season_number, episode_number) {
 function kill_with_pid_file(pid_file, callback){
 	fs.readFile(pid_file, 'utf8', (function (pid_file, callback, err, data) {
 		if(err) return callback();
+		data=data.split(" ",1);
 		kill_with_pid(data, (function (pid_file, callback) {
 			fs.unlink(pid_file, callback);
 		}).bind(undefined, pid_file, callback));

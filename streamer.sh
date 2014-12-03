@@ -6,7 +6,6 @@ cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bu
 data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 episodes="${cache}/episodes/"
 PEERFLIX_PID="${cache}/peerflix.pid"
-SECONDARY_PEERFLIX_PID="${cache}/secondary_peerflix.pid"
 PLAYER_PID="${cache}/player.pid"
 NEXT_EP_HOST="${cache}/next_ep_host.txt"
 NODE_PID="${cache}/node.pid"
@@ -39,15 +38,16 @@ if [[ $case_letter == "m" ]] ; then
 
 	# is this ep pre loaded?
 	is_pre_loaded=0
-	if [[ -f ${NEXT_EP_HOST} ]] && [[ -f ${SECONDARY_PEERFLIX_PID} ]] && kill -0 $(cat "${SECONDARY_PEERFLIX_PID}"); then
+	if [[ -f ${NEXT_EP_HOST} ]]; then
 		next_ep_host_info=$(cat "${NEXT_EP_HOST}")
-		next_ep_host_id=$(echo $next_ep_host_info| cut -d " " -f1)
-		next_ep_host_season=$(echo $next_ep_host_info| cut -d " " -f2)
-		next_ep_host_episode=$(echo $next_ep_host_info| cut -d " " -f3)
-		next_ep_host_magnet=$(echo $next_ep_host_info| cut -d " " -f4)
-		next_ep_host_url=$(echo $next_ep_host_info| cut -d " " -f5)
+		next_ep_peerflix_pid=$(echo $next_ep_host_info| cut -d " " -f1)
+		next_ep_host_id=$(echo $next_ep_host_info| cut -d " " -f2)
+		next_ep_host_season=$(echo $next_ep_host_info| cut -d " " -f3)
+		next_ep_host_episode=$(echo $next_ep_host_info| cut -d " " -f4)
+		next_ep_host_magnet=$(echo $next_ep_host_info| cut -d " " -f5)
+		next_ep_host_url=$(echo $next_ep_host_info| cut -d " " -f6)
 
-		if [[ $id -eq $next_ep_host_id ]] && [[ $season -eq $next_ep_host_season ]] && [[ $episode -eq $next_ep_host_episode ]]; then
+		if kill -0 $next_ep_peerflix_pid && [[ $id -eq $next_ep_host_id ]] && [[ $season -eq $next_ep_host_season ]] && [[ $episode -eq $next_ep_host_episode ]]; then
 			is_pre_loaded=1
 
 			# use existing peerflix
@@ -59,11 +59,10 @@ if [[ $case_letter == "m" ]] ; then
 				player="VLC"
 			fi
 			echo $! > "${PLAYER_PID}"
-			mv ${SECONDARY_PEERFLIX_PID} ${PEERFLIX_PID}
+			echo $next_ep_peerflix_pid > "${PEERFLIX_PID}"
 
 			# create secondary peerflix to trigger "on-downloaded" event
 			nohup node ./node_modules/peerflix/app.js "$next_ep_host_magnet" -q -f "${episodes}" --on-downloaded "nohup ./pre_dl_ep.sh $id $season $episode" &
-			echo $! > "${SECONDARY_PEERFLIX_PID}"
 		fi
 	fi
 
@@ -91,11 +90,15 @@ if [[ $case_letter == "m" ]] ; then
 		echo $! > "${PEERFLIX_PID}"
 
 		# kill secondary peerflix
-		if [[ -f ${SECONDARY_PEERFLIX_PID} ]] && kill -0 $(cat "${SECONDARY_PEERFLIX_PID}"); then
-			kill -9 $(cat "${SECONDARY_PEERFLIX_PID}")
-			while kill -0 $(cat "${SECONDARY_PEERFLIX_PID}"); do :; done
+		if [[ -f ${NEXT_EP_HOST} ]]; then
+			next_ep_host_info=$(cat "${NEXT_EP_HOST}")
+			next_ep_peerflix_pid=$(echo $next_ep_host_info| cut -d " " -f1)
+			if kill -0 $next_ep_peerflix_pid; then
+				kill -9 $next_ep_peerflix_pid
+				while kill -0 $next_ep_peerflix_pid; do :; done
+			fi
+			rm "$NEXT_EP_HOST"
 		fi
-		rm "$SECONDARY_PEERFLIX_PID"
 	fi
 
 

@@ -5,7 +5,8 @@ bundle="florian.shows"
 cache=${HOME}/Library/Caches/com.runningwithcrayons.Alfred-2/Workflow\ Data/${bundle}
 data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 episodes="${cache}/episodes/"
-SECONDARY_PEERFLIX_PID="${cache}/secondary_peerflix.pid"
+PEERFLIX_PID="${cache}/peerflix.pid"
+NEXT_EP_HOST="${cache}/next_ep_host.txt"
 NODE_PID="${cache}/node.pid"
 init=$(date +%s);
 
@@ -17,17 +18,21 @@ season=$(echo $magnet| cut -d " " -f2)
 episode=$(echo $magnet| cut -d " " -f3)
 magnet=$(echo $magnet| cut -d " " -f4)
 
-# remember to kill previous secondary peerflix
+# remember to kill peerflix that launched this very script if it's not the one being used right now
 peerflix_to_kill_pid=0
-if [[ -f ${SECONDARY_PEERFLIX_PID} ]] && kill -0 $(cat "${SECONDARY_PEERFLIX_PID}"); then
-	peerflix_to_kill_pid=$(cat "${SECONDARY_PEERFLIX_PID}")
+if [[ -f ${NEXT_EP_HOST} ]]; then
+	next_ep_host_info=$(cat "${NEXT_EP_HOST}")
+	next_ep_peerflix_pid=$(echo $next_ep_host_info| cut -d " " -f1)
+	if kill -0 $next_ep_peerflix_pid && [[ $next_ep_peerflix_pid -eq $(cat "${PEERFLIX_PID}") ]]; then
+		peerflix_to_kill_pid=$(ps -o ppid= $$)
+		rm "$NEXT_EP_HOST"
+	fi
 fi
 
 # start downloading it
 nohup node ./node_modules/peerflix/app.js "$magnet" --hostname 127.0.0.1 -q -f "${episodes}" --on-listening "./log_pre_dl_ep_host.sh $id $season $episode \"$magnet\"" &
-echo $! > "${SECONDARY_PEERFLIX_PID}"
 
-# actually kill previous secondary peerflix
+# actually kill secondary peerflix
 if [[ $peerflix_to_kill_pid -gt 0 ]]; then
 	kill -9 $peerflix_to_kill_pid
 fi
