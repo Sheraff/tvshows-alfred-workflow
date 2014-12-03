@@ -9,6 +9,7 @@ PEERFLIX_PID="${cache}/peerflix.pid"
 PLAYER_PID="${cache}/player.pid"
 NEXT_EP_HOST="${cache}/next_ep_host.txt"
 NODE_PID="${cache}/node.pid"
+NODE_PORT="${cache}/node.port"
 init=$(date +%s);
 
 QUERY=$1
@@ -18,16 +19,26 @@ QUERY=${QUERY:1}
 function start_server {
 	# kickoff server if it isn't running
 	if [[ ! -f ${NODE_PID} ]] || ( ! ps -p $(cat "${NODE_PID}") > /dev/null ); then
+		# find port
+		found=0; port=9000
+		while [ $found -eq 0 ]; do
+			let port=port+1
+			if [[ ! "$(netstat -aln | awk '$6 == "LISTEN" && $4 ~ "port$"')" ]]; then found=1; fi
+		done
 		# launch server
-		nohup node ./server.js 127.0.0.1:8374 &> "${cache}/node-out.txt" &
-		# and store NODE_PID
+		nohup ${node} ./server.js 127.0.0.1:$port &> "${cache}/node-out.txt" &
+		# and store
 		echo $! > "${NODE_PID}"
+		echo $port > "${NODE_PORT}"
+	else
+		port=$(cat "${NODE_PORT}")
 	fi
+	echo $port
 }
 
 # case "m" for magnet
 if [[ $case_letter == "m" ]] ; then
-	start_server
+	port=$(start_server)
 
 	# parsing input
 	id=$(echo $QUERY| cut -d " " -f1)
@@ -72,7 +83,7 @@ if [[ $case_letter == "m" ]] ; then
 		terminal-notifier -title "Loading torrent..." -message "$title" -sender com.runningwithcrayons.Alfred-2 -contentImage "${data}/imgs/$id.jpg"
 
 		# get magnet
-		until magnet=$(curl 127.0.0.1:8374 -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+		until magnet=$(curl 127.0.0.1:$port -s -d "magnet_id=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 
 		# wait for previous peerflix to die
 		if [[ -f ${PEERFLIX_PID} ]] && kill -0 $(cat "${PEERFLIX_PID}"); then
@@ -103,7 +114,7 @@ if [[ $case_letter == "m" ]] ; then
 
 
 	# wait for server response (in case node isn't done launching yet)
-	until out=$(curl 127.0.0.1:8374 -s -d "stream=$title" -d "show_id=$id" -d "player=$player") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	until out=$(curl 127.0.0.1:$port -s -d "stream=$title" -d "show_id=$id" -d "player=$player") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	echo " "
 
 fi

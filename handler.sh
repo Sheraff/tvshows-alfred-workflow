@@ -7,6 +7,7 @@ data=${HOME}/Library/Application\ Support/Alfred\ 2/Workflow\ Data/${bundle}
 PEERFLIX_PID="${cache}/peerflix.pid"
 PLAYER_PID="${cache}/player.pid"
 NODE_PID="${cache}/node.pid"
+NODE_PORT="${cache}/node.port"
 init=$(date +%s);
 
 QUERY="$1"
@@ -16,11 +17,21 @@ QUERY=${QUERY:1}
 function start_server {
 	# kickoff server if it isn't running
 	if [[ ! -f ${NODE_PID} ]] || ( ! ps -p $(cat "${NODE_PID}") > /dev/null ); then
+		# find port
+		found=0; port=9000
+		while [ $found -eq 0 ]; do
+			let port=port+1
+			if [[ ! "$(netstat -aln | awk '$6 == "LISTEN" && $4 ~ "port$"')" ]]; then found=1; fi
+		done
 		# launch server
-		nohup node ./server.js 127.0.0.1:8374 &> "${cache}/node-out.txt" &
-		# and store NODE_PID
+		nohup ${node} ./server.js 127.0.0.1:$port &> "${cache}/node-out.txt" &
+		# and store
 		echo $! > "${NODE_PID}"
+		echo $port > "${NODE_PORT}"
+	else
+		port=$(cat "${NODE_PORT}")
 	fi
+	echo $port
 }
 function isthismydad {
 	parent=$(ps -p ${1:-$$} -o ppid=)
@@ -78,10 +89,10 @@ if [[ $case_letter == "l" ]] ; then
 
 # case "f" for favorite
 elif [[ $case_letter == "f" ]] ; then
-	start_server
+	port=$(start_server)
 	id=$(echo $QUERY| cut -d " " -f1)
 	name=${QUERY:${#id}}
-	until out=$(curl 127.0.0.1:8374 -s -d "fav=${id:1}" -d "bool=${id:0:1}") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+	until out=$(curl 127.0.0.1:$port -s -d "fav=${id:1}" -d "bool=${id:0:1}") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
 # case "c" for current
@@ -91,24 +102,24 @@ elif [[ $case_letter == "c" ]] ; then
 
 # case "w" for watched
 elif [[ $case_letter == "w" ]] ; then
-	start_server
+	port=$(start_server)
 	sub_case_letter=${QUERY:0:1}
 	QUERY=${QUERY:1}
 	id=$(echo $QUERY| cut -d " " -f1)
 	if [[ $sub_case_letter == "f" ]] ; then #case "f" for full
 		name=${QUERY:$[${#id}+1]}
-		until out=$(curl 127.0.0.1:8374 -s -d "mark_watched=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+		until out=$(curl 127.0.0.1:$port -s -d "mark_watched=$id") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	elif [[ $sub_case_letter == "s" ]]; then #case "s" for specific
 		season=$(echo $QUERY| cut -d " " -f2)
 		episode=$(echo $QUERY| cut -d " " -f3)
 		name=${QUERY:$[${#id}+${#season}+${#episode}]+3}
-		until out=$(curl 127.0.0.1:8374 -s -d "mark_watched=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
+		until out=$(curl 127.0.0.1:$port -s -d "mark_watched=$id" -d "season=$season" -d "episode=$episode") || [[ $(($(date +%s)-init)) -gt 10 ]]; do :; done
 	fi
 	osascript -e "tell application \"Alfred 2\" to run trigger \"query\" in workflow \"florian.shows\" with argument \"$name \""
 
 # case "m" for magnet
 elif [[ $case_letter == "m" ]] ; then
-	start_server
+	port=$(start_server)
 	killpeerflixandplayer
 
 	printf "$case_letter$QUERY"

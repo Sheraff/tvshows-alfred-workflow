@@ -8,10 +8,11 @@ episodes="${cache}/episodes/"
 PEERFLIX_PID="${cache}/peerflix.pid"
 NEXT_EP_HOST="${cache}/next_ep_host.txt"
 NODE_PID="${cache}/node.pid"
+NODE_PORT="${cache}/node.port"
 init=$(date +%s);
 
 # ask for next ep's magnet
-magnet=$(curl 127.0.0.1:8374 -s -d "next_magnet_id=$1" -d "season=$2" -d "episode=$3")
+magnet=$(curl 127.0.0.1:$(cat "${NODE_PORT}") -s -d "next_magnet_id=$1" -d "season=$2" -d "episode=$3")
 
 id=$(echo $magnet| cut -d " " -f1)
 season=$(echo $magnet| cut -d " " -f2)
