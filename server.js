@@ -944,13 +944,28 @@ function days_until(date) {
 }
 
 function pretty_date (date) {
+
 	var next_air_date = date.split("-");
-	var now = new Date(Date.now());
 	next_air_date = new Date(next_air_date[0], next_air_date[1]-1, next_air_date[2]);
-	if(next_air_date.getTime()<now.getTime())
-		return false;
+	var now = new Date(Date.now());
+	var diff = next_air_date.getTime()-now.getTime();
 	var next_ep_str = "";
-	if(now.getFullYear()==next_air_date.getFullYear() && now.getMonth()==next_air_date.getMonth() && now.getDate()==next_air_date.getDate()){
+
+	if(diff < 0){
+		return false;
+	} else if(diff > 4*7*24*60*60*1000){ // more than 4 weeks => "in January 2099"
+		next_ep_str = "in "+(["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][next_air_date.getMonth()])
+		if((now.getFullYear()+1==next_air_date.getFullYear() && now.getMonth()<=next_air_date.getMonth()) || now.getFullYear()+1<next_air_date.getFullYear()){
+			next_ep_str += " "+next_air_date.getFullYear();
+		}
+	} else if(diff > 2*7*24*60*60*1000){ // more than 2 weeks => "in 3 weeks"
+		next_ep_str = "in " + Math.floor(diff / (7*24*60*60*1000)) + " weeks";
+	} else if(diff > 7*24*60*60*1000){ // more than a week => "in 10 days" or "next week on Tuesday" if appropriate
+		if((next_air_date.getDay()+1)%7>=(now.getDay()+1)%7)
+			next_ep_str = "next week on "+(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][next_air_date.getDay()]);
+		else
+			next_ep_str = "in " + Math.floor(diff / (24*60*60*1000)) + " days";
+	} else if(now.getDate()==next_air_date.getDate()){ // same day => "today"
 		next_ep_str = "today";
 	} else {
 		var tomorrow = new Date(Date.now());
@@ -958,26 +973,8 @@ function pretty_date (date) {
 		if(tomorrow.getFullYear()==next_air_date.getFullYear() && tomorrow.getMonth()==next_air_date.getMonth() && tomorrow.getDate()==next_air_date.getDate()){
 			next_ep_str = "tomorrow"
 		} else {
-			var next_week = new Date(Date.now());
-			next_week.setDate(next_week.getDate() + 7);
-			if(next_week.getTime()>next_air_date.getTime()){
-				next_week.setDate(next_week.getDate() - 1);
-				next_ep_str = next_air_date.getDate()==next_week.getDate() ? "next" : "on";
-				next_ep_str += " "+(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][next_air_date.getDay()]);
-			} else {
-				if(now.getMonth()+1>=(next_air_date.getMonth())+12*(next_air_date.getFullYear()-now.getFullYear())){
-					var in_days = Math.floor((next_air_date.getTime()-now.getTime())/(24*60*60*1000));
-					if(in_days%7==0)
-						next_ep_str = "in "+(in_days/7)+" week"+((in_days/7)>1?"s":"");
-					else
-						next_ep_str = "in "+in_days+" day"+(in_days>1?"s":"");
-				} else {
-					next_ep_str = "in "+(["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][next_air_date.getMonth()])
-					if((now.getFullYear()+1==next_air_date.getFullYear() && now.getMonth()<=next_air_date.getMonth()) || now.getFullYear()+1<next_air_date.getFullYear()){
-						next_ep_str += " "+next_air_date.getFullYear();
-					}
-				}
-			}
+			next_ep_str = next_air_date.getDay()==now.getDay() ? "next" : "on";
+			next_ep_str += " "+(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][next_air_date.getDay()]);
 		}
 	}
 	return next_ep_str;
@@ -1359,7 +1356,7 @@ function get_magnet (show, episode, callback) {
 		if(episode.magnet && check_time_with(episode.magnet.timestamp, magnet_expiration) == 1 && !(episode.air_date && (!episode.magnet.piratebay || episode.magnet.piratebay == false || episode.magnet.piratebay == "false") && check_time_with(date_from_tmdb_format(episode.air_date), 128) == 1 && check_time_with(episode.magnet.timestamp, no_magnet_recheck) == -1))
 			callback(episode.magnet);
 		else{
-			search_piratebay(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
+			search_piratebay(show.name+" "+formatted_episode_number(episode)+"*", (function (show, episode, callback, results) {
 
 				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
 				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
