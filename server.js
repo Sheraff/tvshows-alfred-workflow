@@ -434,10 +434,7 @@ function simple_output(result, preciseDate, callback) {
 }
 
 function complete_oneline_output (result, order_index, preciseDate, callback) {
-	if(typeof result === 'function'){
-		callback = result;
-		result = undefined;
-	} else if (typeof order_index === 'function'){
+	if (typeof order_index === 'function'){
 		callback = order_index;
 		order_index = undefined;
 	} else if (typeof preciseDate === 'function'){
@@ -1625,7 +1622,10 @@ function alfred_xml (bundleid) {
 		var new_order = this.results.push(a_result);
 
 		// memorize required index
-		if(index) this.order[index] = new_order-1;
+		if(index){
+			if(!this.order[index]) this.order[index] = [];
+			this.order[index].push(new_order-1);
+		}
 
 		// send it to work
 		return this.results[new_order-1];
@@ -1634,8 +1634,10 @@ function alfred_xml (bundleid) {
 	this.echo = function () {
 		for (var i = 0, l = this.order.length; i < l; i++) {
 			if(this.order[i]!=null){
-				var result_xml = this.results[this.order[i]].toXML();
-				this.xml += result_xml;
+				for (var j = 0; j < this.order[i].length; j++) {
+					var result_xml = this.results[this.order[i][j]].toXML();
+					this.xml += result_xml;
+				};
 			}
 		};
 		for (var i = 0, l = this.results.length; i < l; i++) {
