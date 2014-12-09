@@ -464,7 +464,9 @@ function complete_oneline_output (result, order_index, preciseDate, callback) {
 						var temp_sub = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(!magnet.piratebay){
 							order_range = 100;
-							if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 24) == 1){
+							if (magnet.error){
+								temp_sub = "Up soon: "+temp_sub+" — The torrent database couldn't be reached, please try again later...";
+							} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 24) == 1){
 								temp_sub = "Up soon: "+temp_sub+" — This episode is airing today, wait a little for the torrent...";
 							} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 48) == 1){
 								temp_sub = "Up soon: "+temp_sub+" — This episode aired yesterday, wait a little for the torrent...";
@@ -587,7 +589,9 @@ function browse (result, season, episode, callback) {
 							}
 							item.alt = "Download torrent ( release ⌥ to "+(episode.progress && episode.progress>30?"resume streaming at "+percent_progress(episode)+"%, ⌘+Enter to watch from the beginning":"start streaming this episode")+" )";
 						} else {
-							if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
+							if(magnet.error)
+								item.subtitle = "The torrent database couldn't be reached, please try again later...";
+							else if(episode.air_date && date_from_tmdb_format(episode.air_date) > Date.now()-25*60*60*1000)
 								item.subtitle = "This episode is airing today, wait a little for the torrent...";
 							else if(episode.progress && percent_progress(episode)<percent_to_consider_watched*100)
 								item.subtitle = "You watched "+percent_progress(episode)+"% of this episode, but it isn't available on piratebay anymore. Press Enter to mark as watched."
@@ -1358,36 +1362,46 @@ function get_magnet (show, episode, callback) {
 			callback(episode.magnet);
 		else{
 			search_piratebay(show.name+" "+formatted_episode_number(episode)+"*", (function (show, episode, callback, results) {
+				if(results.error && episode.magnet && episode.magnet.piratebay){
+					callback(episode.magnet);
+				} else {
+					var magnet = {}
+					if(results.error){
+						magnet = {
+							timestamp: Date.now(),
+							error: results.error
+						}
+					} else {
+						var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
+						regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+						var re = new RegExp(regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
 
-				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
-				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-				var re = new RegExp(regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
+						var found = false;
+						for (var i = 0, l = results.length; i < l; i++) {
+							var match = results[i].name.match(re);
+							if(match && match.length>0){
+								found = true;
+								break;
+							}
+						};
 
-				var found = false;
-				for (var i = 0, l = results.length; i < l; i++) {
-					var match = results[i].name.match(re);
-					if(match && match.length>0){
-						found = true;
-						break;
+						magnet = {
+							"timestamp": Date.now(),
+							"piratebay": (found?results[i]:false)
+						}
 					}
-				};
+					callback(magnet);
 
-				var magnet = {
-					"timestamp": Date.now(),
-					"piratebay": (found?results[i]:false)
+					if(episode.season_number && episode.episode_number){
+						var setModifier = { $set: {} };
+						setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
+						db.shows.update({
+							id: parseInt(show.id)
+						}, setModifier, { upsert: true }, function (){
+							console.log(" ... new magnet "+(show.name?show.name:""));
+						});
+					}
 				}
-				callback(magnet);
-
-				if(episode.season_number && episode.episode_number){
-					var setModifier = { $set: {} };
-					setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
-					db.shows.update({
-						id: parseInt(show.id)
-					}, setModifier, { upsert: true }, function (){
-						console.log(" ... new magnet "+(show.name?show.name:""));
-					});
-				}
-
 			}).bind(undefined, show, episode, callback));
 		}
 	} else {
@@ -1492,7 +1506,8 @@ function search_piratebay (query, callback) {
 				var results = crawl_piratebay_html(body);
 				callback(results);
 			} else {
-				callback(false);
+				console.log("piratebay error with "+query);
+				callback({error: true});
 			}
 		}).bind(undefined, callback)
 	);
