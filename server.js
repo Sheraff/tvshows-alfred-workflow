@@ -136,6 +136,7 @@ function finish_initializing () {
 
 function Parallel (){
 	var all_fn = [];
+	var open = true;
 	this.add = function (parallelized) {
 		all_fn.push(false);
 		process.nextTick((function(index) {
@@ -152,7 +153,10 @@ function Parallel (){
 	};
 	function callback (index) {
 		all_fn[index] = true;
-		if(alldone()) done();
+		if(open && alldone()){
+			open = false;
+			done();
+		}
 	}
 	function alldone () {
 		for (var i = all_fn.length - 1; i >= 0; i--) {
@@ -184,6 +188,7 @@ function no_result(){
 }
 
 function out_to_alfred(){
+	console.log("outputing xml");
 	http_response.end(w.echo());
 	finish_initializing();
 }
@@ -206,14 +211,16 @@ function homepage(callback) {
 						item.autocomplete = doc.name+(docs.length>1 && doc.first_air_date ? " ("+doc.first_air_date.split("-")[0]+") " : " ");
 						done();
 					}).bind(undefined, doc, item));
+				});
+				parallel.add(function(done){
 					fs.exists(imgs_folder+"/"+doc.id+".jpg", (function (item, name, exists) {
 						item.icon = exists?name:"icon.png";
 						done();
 					}).bind(undefined, item, imgs_folder+"/"+doc.id+".jpg"));
 				});
+				done();
 			})
 			parallel.add(homepage2);
-			done();
 		} else {
 			db.shows.find({ "last_watched": { $exists: true } }).sort({ "last_watched.timestamp": -1 }).limit(1).exec(function (err, docs) {
 				if(docs && docs.length>0){
@@ -404,10 +411,7 @@ function search_for_show (query, callback) {
 }
 
 function simple_output(result, preciseDate, callback) {
-	if(typeof result === 'function'){
-		callback = result;
-		result = undefined;
-	} else if (typeof preciseDate === 'function'){
+	if (typeof preciseDate === 'function'){
 		callback = preciseDate;
 		preciseDate = undefined;
 	}
@@ -1481,11 +1485,14 @@ function search_piratebay (query, callback) {
 	if(!request) request = require('request');
 	request({
 			url: 'http://thepiratebay.se/search/'+query.trim()+'/0/7/'+video_quality,
-			gzip: 'true'
+			gzip: 'true',
+			timeout: 3000
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
 				var results = crawl_piratebay_html(body);
 				callback(results);
+			} else {
+				callback(false);
 			}
 		}).bind(undefined, callback)
 	);
