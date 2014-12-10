@@ -913,7 +913,7 @@ function st_nd_rd_th (nb) {
 }
 
 function check_time_with (timestamp, timeref_in_hours){
-	if(!timestamp || timeref_in_hours==undefined || timeref_in_hours==null) return false;
+	if(!timestamp || timeref_in_hours===undefined || timeref_in_hours===null) return false;
 	return (timestamp < (Date.now() - timeref_in_hours*60*60*1000)) ? -1 : (timestamp > (Date.now() - timeref_in_hours*60*60*1000)) ? 1 : 0;
 }
 
@@ -1361,63 +1361,124 @@ function get_magnet (show, episode, callback) {
 		if(episode.magnet && check_time_with(episode.magnet.timestamp, magnet_expiration) == 1 && !(episode.air_date && (!episode.magnet.piratebay || episode.magnet.piratebay == false || episode.magnet.piratebay == "false") && check_time_with(date_from_tmdb_format(episode.air_date), 128) == 1 && check_time_with(episode.magnet.timestamp, no_magnet_recheck) == -1))
 			callback(episode.magnet);
 		else{
-			search_kickass(show.name+" "+formatted_episode_number(episode), (function (show, episode, callback, results) {
-				if(results.error && episode.magnet && episode.magnet.piratebay){
-					callback(episode.magnet);
+			function find_best_in_list (show, episode, results) {
+				if(results.error){
+					return {
+						timestamp: Date.now(),
+						error: results.error
+					}
 				} else {
-					var magnet = {}
-					if(results.error){
+					var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
+					regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+					var re = new RegExp(regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
+
+					var found = false;
+					for (var i = 0, l = results.length; i < l; i++) {
+						var match = (results[i].name || results[i].title).match(re);
+						if(match && match.length>0){
+							found = true;
+							break;
+						}
+					};
+
+					if(found && !results[i].name){ // convert kickass to piratebay format
+						results[i] = {
+						    "name": results[i].title,
+						    "uploadDate": results[i].pubDate,
+						    "size": results[i].size,
+						    "seeders": results[i].seeds,
+						    "leechers": results[i].leechs,
+						    "link": results[i].link,
+						    "magnetLink": "magnet:?xt=urn:btih:"+results[i].hash
+						}
+					}
+
+					return {
+						"timestamp": Date.now(),
+						"piratebay": (found?results[i]:false)
+					}
+				}
+			}
+			var magnets = [];
+			var parallel = new Parallel()
+				.add(function (done) {
+					search_kickass(show.name+" "+formatted_episode_number(episode), (function (show, episode, results) {
+						magnets.push(find_best_in_list(show, episode, results));
+						done();
+					}).bind(undefined, show, episode));
+				})
+				.add(function (done) {
+					search_piratebay(show.name+" "+formatted_episode_number(episode)+"*", (function (show, episode, results) {
+						magnets.push(find_best_in_list(show, episode, results));
+						done();
+					}).bind(undefined, show, episode));
+				})
+			parallel.done(function () {
+				var magnet = {};
+
+				// no connection
+				var unreachable = true;
+				for (var i = magnets.length - 1; i >= 0; i--) {
+					if(!magnets[i].error){
+						unreachable = false;
+						break;
+					}
+				};
+				if(unreachable && magnets.length>0){
+					if(episode.magnet && episode.magnet.piratebay){
+						magnet = episode.magnet;
+					} else {
 						magnet = {
 							timestamp: Date.now(),
 							error: results.error
-						}
-					} else {
-						var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
-						regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-						var re = new RegExp(regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
-
-						var found = false;
-						for (var i = 0, l = results.length; i < l; i++) {
-							var match = (results[i].name || results[i].title).match(re);
-							if(match && match.length>0){
-								found = true;
-								break;
-							}
 						};
-
-						if(found && !results[i].name){ // convert kickass to piratebay format
-							results[i] = {
-							    "name": results[i].title,
-							    "uploadDate": results[i].pubDate,
-							    "size": results[i].size,
-							    "seeders": results[i].seeds,
-							    "leechers": results[i].leechs,
-							    "link": results[i].link,
-							    "magnetLink": "magnet:?xt=urn:btih:"+results[i].hash
-							}
-						}
-
-						magnet = {
-							"timestamp": Date.now(),
-							"piratebay": (found?results[i]:false)
-						}
-					}
-					callback(magnet);
-
-					if(episode.season_number && episode.episode_number){
-						var setModifier = { $set: {} };
-						setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
-						db.shows.update({
-							id: parseInt(show.id)
-						}, setModifier, { upsert: true }, function (){
-							if(results.error)
-								console.log(" ... no magnet for "+(show.name?show.name:""));
-							else
-								console.log(" ... new magnet for "+(show.name?show.name:""));
-						});
 					}
 				}
-			}).bind(undefined, show, episode, callback));
+				// no result
+				var none = true;
+				for (var i = magnets.length - 1; i >= 0; i--) {
+					if(magnets[i].piratebay){
+						none = false;
+						break;
+					}
+				};
+				if(none){
+					if(episode.magnet && episode.magnet.piratebay){
+						magnet = episode.magnet;
+					} else {
+						magnet = {
+							timestamp: Date.now(),
+							piratebay: false
+						};
+					}
+				}
+
+				// best result
+				if(!none && !unreachable){
+					magnet = magnets[0];
+					for (var i = magnets.length - 1; i > 0; i--) {
+						if(magnet.piratebay && magnets[i].piratebay && magnets[i].piratebay.seeders > magnet.piratebay.seeders)
+							magnet = magnets[i];
+					};
+				}
+
+				// send to work
+				callback(magnet);
+
+				// log in db
+				if(episode.season_number && episode.episode_number){
+					var setModifier = { $set: {} };
+					setModifier.$set["season."+episode.season_number+".episode."+episode.episode_number+".magnet"] = magnet;
+					db.shows.update({
+						id: parseInt(show.id)
+					}, setModifier, { upsert: true }, function (){
+						if(magnet.error || !magnet.piratebay)
+							console.log(" ... no magnet for "+(show.name?show.name:""));
+						else
+							console.log(" ... new magnet for "+(show.name?show.name:""));
+					});
+				}
+			})
 		}
 	} else {
 		callback({
@@ -1429,14 +1490,14 @@ function get_magnet (show, episode, callback) {
 
 function get_magnets_for_season (show, season_number, callback) {
 	if(season_number){
-		get_episodes(show, season_number, (function (callback, season_number, show) {
+		get_episodes(show, season_number, function (show) {
 			if(show.season && show.season[""+season_number+""] && show.season[""+season_number+""].episode){
-				var keys = Object.keys(show.season[""+season_number+""]["episode"]);
+				var keys = Object.keys(show.season[""+season_number+""].episode);
 				var has_em_all = true;
 				var lonely_episode = false;
 				for (var i = 0, l = keys.length; i < l; i++) {
-					var temp_episode = show["season"][""+season_number+""]["episode"][keys[i]];
-					if((temp_episode.air_date && check_time_with(temp_episode.air_date, 0) == -1 ) && (!temp_episode.magnet || temp_episode.magnet.piratebay==false || check_time_with(temp_episode.magnet.timestamp, magnet_expiration) == -1 )){
+					var temp_episode = show.season[""+season_number+""].episode[keys[i]];
+					if(temp_episode.air_date && check_time_with(date_from_tmdb_format(temp_episode.air_date), 0) == -1 && (!temp_episode.magnet || !temp_episode.magnet.piratebay || check_time_with(temp_episode.magnet.timestamp, magnet_expiration) == -1 )){
 						has_em_all = false;
 						if(lonely_episode){
 							lonely_episode = false;
@@ -1446,52 +1507,85 @@ function get_magnets_for_season (show, season_number, callback) {
 						}
 					}
 				};
-				if(has_em_all) callback(show);
+				if(has_em_all){
+					callback(show);
+				}
 				else if(lonely_episode){
 					get_magnet(show, lonely_episode, (function (callback, show, episode, magnet) {
 						show["season"][""+episode.season_number+""]["episode"][""+episode.episode_number+""].magnet = magnet;
 						callback(show);
 					}).bind(undefined, callback, show, lonely_episode))
 				} else {
-					search_kickass(show.name+" S"+leading_zero(season_number)+"E", (function (callback, show, season_number, results) {
-						//modify show
+					var magnets = [];
+					function find_bests_in_list (show, season_number, results) {
 						var updated_episodes = [];
-						var setModifier = { $set: {} };
 						for (var i = 0, l = results.length; i < l; i++) {
 							var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
 							regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
 							var re = new RegExp(regexed_name+"[. ]?s[0-9]{2}e[0-9]{2}", "i");
-							var match = results[i].name.match(re);
+							var match = (results[i].name || results[i].title).match(re);
 							if(match && match.length>0){
-								var match = results[i].name.match(/s[0-9]{2}e[0-9]{2}/i);
+								var match = (results[i].name || results[i].title).match(/s[0-9]{2}e[0-9]{2}/i);
 								var numbers = match[0].match(/[0-9]{2}/g)
-								if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1){
-									var magnet = {
+								if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1 && ( !magnets[""+parseInt(numbers[1])+""] || magnets[""+parseInt(numbers[1])+""].seeders < (results[i].seeders || results[i].seeds) )){
+									if(!results[i].name){ // convert kickass to piratebay format
+										results[i] = {
+											"name": results[i].title,
+											"uploadDate": results[i].pubDate,
+											"size": results[i].size,
+											"seeders": results[i].seeds,
+											"leechers": results[i].leechs,
+											"link": results[i].link,
+											"magnetLink": "magnet:?xt=urn:btih:"+results[i].hash
+										}
+									}
+									magnets[""+numbers[1]+""] = {
 										"timestamp": Date.now(),
 										"piratebay": results[i]
-									}
-									if(show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""]){
-										show["season"][""+season_number+""]["episode"][""+parseInt(numbers[1])+""].magnet = magnet;
-										setModifier.$set["season."+season_number+".episode."+parseInt(numbers[1])+".magnet"] = magnet;
-										updated_episodes.push(parseInt(numbers[1]));
 									}
 								}
 							}
 						};
-
-						callback(show)
+					}
+					var parallel = new Parallel()
+						.add(function (done) {
+							search_kickass(show.name+" S"+leading_zero(season_number)+"E", function (results) {
+								find_bests_in_list(show, season_number, results);
+								done();
+							})
+						})
+						.add(function (done) {
+							search_piratebay(show.name+" S"+leading_zero(season_number)+"E*", function (results) {
+								find_bests_in_list(show, season_number, results);
+								done();
+							})
+						})
+					parallel.done(function () {
+						var setModifier = { $set: {} };
+						var mag_keys = Object.keys(magnets);
+						var updated_episodes = "";
+						if(show.season && show.season[""+season_number+""] && show.season[""+season_number+""].episode){
+							for (var i = mag_keys.length - 1; i >= 0; i--) {
+								if(show["season"][""+season_number+""]["episode"][""+mag_keys[i]+""]){
+									updated_episodes += " "+mag_keys[i];
+									show["season"][""+season_number+""]["episode"][""+mag_keys[i]+""].magnet = magnets[mag_keys[i]];
+									setModifier.$set["season."+season_number+".episode."+mag_keys[i]+".magnet"] = magnets[mag_keys[i]];
+								}
+							};
+						}
+						callback(show);
 
 						//log in db
 						db.shows.update({
 							id: parseInt(show.id)
 						}, setModifier, { upsert: true }, function (){
-							console.log(" ... updated all magnets for "+(show.name?show.name:"")+" season "+season_number);
+							console.log(" ... updated all magnets for "+(show.name?show.name:"")+" season "+season_number+ (updated_episodes?" (episodes"+updated_episodes+")":""));
 						});
-					}).bind(undefined, callback, show, season_number));
+					})
 				}
-			} else callback(false);
-		}).bind(undefined, callback, season_number));
-	} else callback(false);
+			} else callback(show);
+		});
+	} else callback(show);
 }
 
 
@@ -1514,7 +1608,7 @@ function search_kickass (query, callback) {
 	if(!request) request = require('request');
 	request({
 			url: 'https://kickass.so/json.php?field=seeders&order=desc&q='+query.trim(),
-			timeout: 3000,
+			timeout: 2000,
 			json: true
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
@@ -1541,7 +1635,7 @@ function search_piratebay (query, callback) {
 	request({
 			url: 'http://thepiratebay.se/search/'+query.trim()+'/0/7/'+video_quality,
 			gzip: 'true',
-			timeout: 3000
+			timeout: 2000
 		}, (function (callback, error, response, body) {
 			if (!error && response.statusCode == 200) {
 				var results = crawl_piratebay_html(body);
@@ -1757,7 +1851,9 @@ function post_processing (callback) {
 		db.shows.find({ fav: true }, function (err, docs) {
 			if(docs && docs.length>0){
 				for (var i = 0, l = docs.length; i < l; i++) {
-					parallel.add(refresh_show.bind(undefined, docs[i]));
+					parallel.add((function (doc, done) {
+						setTimeout(refresh_show(doc, done),i*1000)
+					}).bind(undefined, docs[i]));
 				};
 			}
 			done();
