@@ -490,7 +490,7 @@ function complete_oneline_output (result, order_index, preciseDate, callback) {
 						callback(order_range + order_index, subtitle);
 					}).bind(undefined, callback, doc, subtitle, episode, order_index))
 				}
-			} else if(doc.status && doc.status=="Ended") {
+			} else if(doc.status && (doc.status==="Ended" || doc.status==="Canceled")) {
 				subtitle += "Last episode (show has ended): "+formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 				order_range = 200
 				callback(order_range+order_index, subtitle);
@@ -1430,7 +1430,7 @@ function get_magnet (show, episode, callback) {
 					} else {
 						magnet = {
 							timestamp: Date.now(),
-							error: results.error
+							error: magnets[0].error
 						};
 					}
 				}
