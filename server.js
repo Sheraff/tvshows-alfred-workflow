@@ -463,14 +463,17 @@ function complete_oneline_output (result, order_index, preciseDate, callback) {
 					get_magnet(doc, episode, (function (callback, doc, subtitle, episode, order_index, magnet) {
 						var temp_sub = formatted_episode_number(episode)+( (episode.name && pretty_string(episode.name) ) ? " — "+episode.name : "" );
 						if(!magnet.piratebay){
-							order_range = 100;
 							if (magnet.error){
+								order_range = 180;
 								temp_sub = "Up soon: "+temp_sub+" — The torrent database couldn't be reached, please try again later...";
 							} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 24) == 1){
-								temp_sub = "Up soon: "+temp_sub+" — This episode is airing today, wait a little for the torrent...";
+								order_range = 150;
+								temp_sub = "Airing today: "+temp_sub;
 							} else if(episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 48) == 1){
+								order_range = 100;
 								temp_sub = "Up soon: "+temp_sub+" — This episode aired yesterday, wait a little for the torrent...";
 							} else {
+								order_range = 180;
 								temp_sub += " — Torrent unavailable on piratebay.";
 							}
 						} else {
@@ -1633,7 +1636,7 @@ function search_piratebay (query, callback) {
 	console.log("------------------------- > internet connection (tpb), querying '"+query+"'")
 	if(!request) request = require('request');
 	request({
-			url: 'http://thepiratebay.se/search/'+query.trim()+'/0/7/'+video_quality,
+			url: 'http://thepiratebay.cr/search/'+query.trim()+'/0/7/'+video_quality,
 			gzip: 'true',
 			timeout: 2000
 		}, (function (callback, error, response, body) {
