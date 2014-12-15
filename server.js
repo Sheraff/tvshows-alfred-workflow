@@ -1361,9 +1361,9 @@ function search_on_mdb (query, callback) {
 function get_magnet (show, episode, callback) {
 	callback = callback || function(){};
 	if(show && episode && ((episode.air_date && check_time_with(date_from_tmdb_format(episode.air_date), 0) == -1) || !episode.air_date)){
-		if(episode.magnet && check_time_with(episode.magnet.timestamp, magnet_expiration) == 1 && !(episode.air_date && (!episode.magnet.piratebay || episode.magnet.piratebay == false || episode.magnet.piratebay == "false") && check_time_with(date_from_tmdb_format(episode.air_date), 128) == 1 && check_time_with(episode.magnet.timestamp, no_magnet_recheck) == -1))
+		if(episode.magnet && check_time_with(episode.magnet.timestamp, magnet_expiration) == 1 && !((!episode.magnet.piratebay || episode.magnet.piratebay===false) && check_time_with(episode.magnet.timestamp, no_magnet_recheck) == -1)){
 			callback(episode.magnet);
-		else{
+		}else{
 			function find_best_in_list (show, episode, results) {
 				if(results.error){
 					return {
@@ -1406,13 +1406,15 @@ function get_magnet (show, episode, callback) {
 			var parallel = new Parallel()
 				.add(function (done) {
 					search_kickass(show.name+" "+formatted_episode_number(episode), (function (show, episode, results) {
-						magnets.push(find_best_in_list(show, episode, results));
+						if(results && results.length>0)
+							magnets.push(find_best_in_list(show, episode, results));
 						done();
 					}).bind(undefined, show, episode));
 				})
 				.add(function (done) {
 					search_piratebay(show.name+" "+formatted_episode_number(episode)+"*", (function (show, episode, results) {
-						magnets.push(find_best_in_list(show, episode, results));
+						if(results && results.length>0)
+							magnets.push(find_best_in_list(show, episode, results));
 						done();
 					}).bind(undefined, show, episode));
 				})
@@ -1531,6 +1533,7 @@ function get_magnets_for_season (show, season_number, callback) {
 								var match = (results[i].name || results[i].title).match(/s[0-9]{2}e[0-9]{2}/i);
 								var numbers = match[0].match(/[0-9]{2}/g)
 								if(season_number==parseInt(numbers[0]) && updated_episodes.indexOf(parseInt(numbers[1]))==-1 && ( !magnets[""+parseInt(numbers[1])+""] || magnets[""+parseInt(numbers[1])+""].seeders < (results[i].seeders || results[i].seeds) )){
+									updated_episodes.push(parseInt(numbers[1]));
 									if(!results[i].name){ // convert kickass to piratebay format
 										results[i] = {
 											"name": results[i].title,
@@ -1553,13 +1556,15 @@ function get_magnets_for_season (show, season_number, callback) {
 					var parallel = new Parallel()
 						.add(function (done) {
 							search_kickass(show.name+" S"+leading_zero(season_number)+"E", function (results) {
-								find_bests_in_list(show, season_number, results);
+								if(results && results.length>0)
+									find_bests_in_list(show, season_number, results);
 								done();
 							})
 						})
 						.add(function (done) {
 							search_piratebay(show.name+" S"+leading_zero(season_number)+"E*", function (results) {
-								find_bests_in_list(show, season_number, results);
+								if(results && results.length>0)
+									find_bests_in_list(show, season_number, results);
 								done();
 							})
 						})
@@ -1614,7 +1619,7 @@ function search_kickass (query, callback) {
 			timeout: 2000,
 			json: true
 		}, (function (callback, error, response, body) {
-			if (!error && response.statusCode == 200) {
+			if (!error && response && response.statusCode == 200) {
 				callback(response.body.list);
 			} else {
 				console.log("kickass error with "+query);
@@ -1640,7 +1645,7 @@ function search_piratebay (query, callback) {
 			gzip: 'true',
 			timeout: 2000
 		}, (function (callback, error, response, body) {
-			if (!error && response.statusCode == 200) {
+			if (!error && response && response.statusCode == 200) {
 				var results = crawl_piratebay_html(body);
 				callback(results);
 			} else {
@@ -1748,9 +1753,9 @@ function alfred_xml (bundleid) {
 			if(this.largetype) this.largetype = escapeXml(this.largetype);
 
 			// uncomment the following as needed based on what is declared in the workflow
-			// this.shift = this.shift	|| this.subtitle;
-			// this.fn = this.fn		|| this.subtitle;
-			// this.ctrl = this.ctrl	|| this.subtitle;
+			this.shift = this.shift	|| this.subtitle;
+			this.fn = this.fn		|| this.subtitle;
+			this.ctrl = this.ctrl	|| this.subtitle;
 			this.alt = this.alt || this.subtitle;
 			this.cmd = this.cmd || this.subtitle;
 
@@ -1774,12 +1779,12 @@ function alfred_xml (bundleid) {
 
 	this.add = function (title, index) {
 		// create result
-		var a_result = new this.result();
-		a_result.title = title;
-		if(index) a_result.indexed = true;
+		var item = new this.result();
+		item.title = title;
+		if(index) item.indexed = true;
 
 		// add it to list
-		var new_order = this.results.push(a_result);
+		var new_order = this.results.push(item);
 
 		// memorize required index
 		if(index){
@@ -2103,25 +2108,27 @@ function get_best_magnet (show, episode, callback) {
 	get_magnet(show, episode, (function (callback, show, episode, magnet) {
 		search_piratebay(show.name+" "+episode.season_number+"x"+leading_zero(episode.episode_number), (function (callback, show, episode, results) {
 
-			var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
-			regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-			var re = new RegExp(regexed_name+"[. ]?"+episode.season_number+"x"+leading_zero(episode.episode_number), "i");
+			if(results && results.length>0){
+				var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
+				regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
+				var re = new RegExp(regexed_name+"[. ]?"+episode.season_number+"x"+leading_zero(episode.episode_number), "i");
 
-			var found = false;
-			for (var i = 0, l = results.length; i < l; i++) {
-				var match = results[i].name.match(re);
-				if(match && match.length>0){
-					found = true;
-					break;
-				}
-			};
+				var found = false;
+				for (var i = 0, l = results.length; i < l; i++) {
+					var match = results[i].name.match(re);
+					if(match && match.length>0){
+						found = true;
+						break;
+					}
+				};
 
-			if(found && ((!magnet || !magnet.piratebay) || results[i].seeders > magnet.piratebay.seeders)){
-				magnet = {
-					"timestamp": Date.now(),
-					"piratebay": results[i]
+				if(found && ((!magnet || !magnet.piratebay) || results[i].seeders > magnet.piratebay.seeders)){
+					magnet = {
+						"timestamp": Date.now(),
+						"piratebay": results[i]
+					}
+					console.log("found good SxEE magnet");
 				}
-				console.log("found good SxEE magnet");
 			}
 
 			if(!magnet || !magnet.piratebay){
