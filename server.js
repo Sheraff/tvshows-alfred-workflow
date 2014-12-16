@@ -112,7 +112,7 @@ initialize();
 
 function initialize () {
 	//things to do right away
-
+	process.title = 'alfredTvShows';
 	delayed_images_interval = setInterval(function () {
 		for (var i = Math.min(5, delayed_images.length); i > 0; i--) {
 			var img = delayed_images.shift();
