@@ -1373,7 +1373,7 @@ function get_magnet (show, episode, callback) {
 				} else {
 					var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '.?')
 					regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-					var re = new RegExp("^[^a-zA-Z0-9]*"+regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[:\\-,. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
+					var re = new RegExp("^[^a-zA-Z0-9]*"+regexed_name+"(([^a-zA-Z0-9]+)?(((19|20)?[0-9]{2})|(US))([^a-zA-Z0-9]+)?)?[:\\-,. ]*?s"+leading_zero(episode.season_number)+"e"+leading_zero(episode.episode_number), "i");
 
 					var found = false;
 					for (var i = 0, l = results.length; i < l; i++) {
@@ -1527,7 +1527,7 @@ function get_magnets_for_season (show, season_number, callback) {
 						for (var i = 0, l = results.length; i < l; i++) {
 							var regexed_name = show.name.replace(/[^a-zA-Z0-9 ]/g, '*?')
 							regexed_name = regexed_name.replace(/[ ]/g, "[. ]?");
-							var re = new RegExp("^[^a-zA-Z0-9]*"+regexed_name+"(([^a-zA-Z0-9]+)?((19|20)?[0-9]{2})([^a-zA-Z0-9]+)?)?[:\\-,. ]*?s[0-9]{2}e[0-9]{2}", "i");
+							var re = new RegExp("^[^a-zA-Z0-9]*"+regexed_name+"(([^a-zA-Z0-9]+)?(((19|20)?[0-9]{2})|(US))([^a-zA-Z0-9]+)?)?[:\\-,. ]*?s[0-9]{2}e[0-9]{2}", "i");
 							var match = (results[i].name || results[i].title).match(re);
 							if(match && match.length>0){
 								var match = (results[i].name || results[i].title).match(/s[0-9]{2}e[0-9]{2}/i);
@@ -1615,7 +1615,7 @@ function search_kickass (query, callback) {
 	console.log("------------------------- > internet connection (kickass), querying '"+query+"'")
 	if(!request) request = require('request');
 	request({
-			url: 'https://kickass.so/json.php?field=seeders&order=desc&q='+query.trim(),
+			url: 'https://kickass.to/json.php?field=seeders&order=desc&q='+query.trim(),
 			timeout: 2000,
 			json: true
 		}, (function (callback, error, response, body) {
